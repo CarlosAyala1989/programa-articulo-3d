@@ -1,0 +1,1107 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agente-Ciel — Simulador de Flujo CAD + Manufactura + Metrología</title>
+<style>
+:root{
+  --bg:#071018;
+  --panel:#0d1823;
+  --panel-2:#101f2d;
+  --panel-3:#14283a;
+  --line:#23394c;
+  --text:#e9f1f7;
+  --muted:#90a5b8;
+  --accent:#53c7ff;
+  --accent-2:#7be495;
+  --warn:#f6c15f;
+  --danger:#ff7b86;
+  --violet:#b497ff;
+  --cyan:#7de9e4;
+  --shadow:0 18px 50px rgba(0,0,0,.28);
+  --radius:18px;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  margin:0;
+  font-family:Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background:
+    radial-gradient(circle at 20% 0%, rgba(83,199,255,.09), transparent 30%),
+    radial-gradient(circle at 90% 20%, rgba(180,151,255,.08), transparent 25%),
+    var(--bg);
+  color:var(--text);
+}
+button,input,select,textarea{font:inherit}
+a{color:inherit}
+.app{display:grid;grid-template-columns:280px 1fr;min-height:100vh}
+.sidebar{
+  position:sticky;top:0;height:100vh;
+  background:rgba(5,13,20,.94);
+  border-right:1px solid var(--line);
+  padding:22px 16px;
+  overflow:auto;
+  backdrop-filter:blur(16px);
+}
+.brand{display:flex;align-items:center;gap:12px;padding:4px 10px 18px}
+.logo{
+  width:42px;height:42px;border-radius:13px;
+  display:grid;place-items:center;
+  background:linear-gradient(145deg,#17364a,#0b1a26);
+  border:1px solid #285773;
+  box-shadow:inset 0 0 24px rgba(83,199,255,.08);
+}
+.logo svg{width:24px;height:24px}
+.brand h1{font-size:17px;margin:0;letter-spacing:.2px}
+.brand small{display:block;color:var(--muted);margin-top:2px}
+.nav-title{font-size:11px;text-transform:uppercase;letter-spacing:.14em;color:#667f93;padding:16px 12px 8px}
+.nav button{
+  width:100%;display:flex;align-items:center;gap:10px;
+  border:0;background:transparent;color:var(--muted);
+  padding:11px 12px;border-radius:12px;cursor:pointer;text-align:left;
+  transition:.18s ease;
+}
+.nav button:hover{background:#0e1b28;color:var(--text)}
+.nav button.active{background:linear-gradient(90deg,rgba(83,199,255,.14),rgba(83,199,255,.04));color:#dff6ff;border:1px solid rgba(83,199,255,.22)}
+.nav .num{
+  width:24px;height:24px;border-radius:8px;display:grid;place-items:center;
+  background:#102334;color:#86cdea;font-size:12px;border:1px solid #1f425a;
+}
+.sidebar-note{
+  margin-top:18px;padding:13px;border:1px dashed #31516a;border-radius:14px;
+  color:#a8bbca;background:#0b1722;font-size:12px;line-height:1.45
+}
+.main{min-width:0}
+.topbar{
+  position:sticky;top:0;z-index:10;
+  display:flex;justify-content:space-between;align-items:center;gap:16px;
+  padding:16px 26px;border-bottom:1px solid var(--line);
+  background:rgba(7,16,24,.82);backdrop-filter:blur(16px)
+}
+.topbar-left h2{font-size:17px;margin:0 0 4px}
+.topbar-left p{margin:0;color:var(--muted);font-size:12px}
+.top-actions{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+.badge,.chip{
+  display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:6px 10px;
+  font-size:12px;border:1px solid #2d4659;background:#0c1924;color:#b9c8d4;
+}
+.badge.ok,.chip.ok{color:#baf4c8;border-color:#2c6e45;background:rgba(58,161,88,.09)}
+.badge.warn,.chip.warn{color:#ffdf9b;border-color:#6c5426;background:rgba(170,114,21,.08)}
+.badge.err,.chip.err{color:#ffc1c6;border-color:#74343a;background:rgba(173,61,72,.08)}
+.badge.info,.chip.info{color:#bcecff;border-color:#2d637f;background:rgba(52,145,190,.08)}
+.content{padding:24px 26px 60px}
+.section{display:none;animation:fade .18s ease}
+.section.active{display:block}
+@keyframes fade{from{opacity:.4;transform:translateY(4px)}to{opacity:1;transform:none}}
+.hero{
+  display:grid;grid-template-columns:1.4fr .8fr;gap:18px;margin-bottom:18px
+}
+.card{
+  background:linear-gradient(180deg,rgba(16,31,45,.96),rgba(10,23,34,.96));
+  border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);
+}
+.card.pad{padding:18px}
+.hero-main{padding:24px;overflow:hidden;position:relative}
+.hero-main:after{
+  content:"";position:absolute;width:320px;height:320px;border-radius:50%;
+  background:radial-gradient(circle,rgba(83,199,255,.11),transparent 65%);
+  right:-90px;top:-130px
+}
+.hero-main h3{font-size:28px;margin:0 0 10px}
+.hero-main p{color:#a8b9c7;max-width:720px;line-height:1.6;margin:0}
+.hero-side{padding:18px}
+.kicker{color:var(--accent);font-size:11px;letter-spacing:.16em;text-transform:uppercase;font-weight:700}
+.grid-4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}
+.grid-3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.grid-2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.metric{padding:16px}
+.metric .label{color:var(--muted);font-size:12px}
+.metric .value{font-size:28px;font-weight:800;margin-top:6px}
+.metric .delta{font-size:11px;color:#7f95a7;margin-top:6px}
+.section-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin:6px 0 14px}
+.section-head h3{font-size:22px;margin:0}
+.section-head p{color:var(--muted);margin:4px 0 0;font-size:13px}
+.btn{
+  border:1px solid #31526a;background:#112435;color:#dbeaf5;
+  padding:9px 13px;border-radius:11px;cursor:pointer;transition:.18s ease
+}
+.btn:hover{transform:translateY(-1px);border-color:#477792}
+.btn.primary{background:linear-gradient(180deg,#1d80ad,#146082);border-color:#3295c1;color:white}
+.btn.good{background:#153f28;border-color:#2c7147}
+.btn.ghost{background:transparent}
+.btn.danger{background:#4c2027;border-color:#7e3541}
+.toolbar{display:flex;gap:8px;flex-wrap:wrap}
+.form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.field{display:flex;flex-direction:column;gap:7px}
+.field label{font-size:12px;color:#a8bac8}
+input,select,textarea{
+  width:100%;border:1px solid #2b455a;background:#091723;color:var(--text);
+  border-radius:11px;padding:10px 11px;outline:none
+}
+textarea{min-height:96px;resize:vertical}
+input:focus,select:focus,textarea:focus{border-color:#3b9ac2;box-shadow:0 0 0 3px rgba(83,199,255,.08)}
+.table-wrap{overflow:auto;border-radius:14px;border:1px solid var(--line)}
+table{width:100%;border-collapse:collapse;min-width:740px}
+th,td{padding:11px 12px;border-bottom:1px solid #203447;font-size:12px;text-align:left}
+th{color:#9fb3c3;background:#0c1b28;position:sticky;top:0}
+tr:hover td{background:rgba(83,199,255,.025)}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.small{font-size:12px;color:var(--muted)}
+.timeline{display:grid;gap:10px}
+.step{
+  display:grid;grid-template-columns:42px 1fr auto;gap:12px;align-items:start;
+  padding:13px;border:1px solid #294255;background:#0b1925;border-radius:14px
+}
+.step .dot{
+  width:32px;height:32px;border-radius:10px;display:grid;place-items:center;font-weight:800;
+  background:#142b3e;border:1px solid #2c516a;color:#9ee0ff
+}
+.step.ok .dot{background:#173624;border-color:#2e7c49;color:#b8f7c8}
+.step.err .dot{background:#3b1d24;border-color:#7d3540;color:#ffc0c7}
+.step.warn .dot{background:#3e3219;border-color:#6f5927;color:#ffe0a3}
+.step h4{margin:1px 0 5px;font-size:13px}
+.step p{margin:0;color:#8fa4b5;font-size:12px;line-height:1.45}
+.code{
+  white-space:pre-wrap;background:#06111a;border:1px solid #1f3445;border-radius:13px;
+  padding:14px;color:#cfe7f3;font-size:12px;line-height:1.55;max-height:320px;overflow:auto
+}
+.viewer{
+  min-height:330px;position:relative;overflow:hidden;border-radius:16px;
+  background:
+    linear-gradient(rgba(255,255,255,.025) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(255,255,255,.025) 1px,transparent 1px),
+    radial-gradient(circle at 50% 35%,#163049,#08131e 65%);
+  background-size:26px 26px,26px 26px,auto;
+  border:1px solid #26445a;
+}
+.viewer .hint{position:absolute;left:12px;bottom:10px;color:#71889a;font-size:11px}
+.viewer svg{width:100%;height:100%;min-height:330px}
+.viewer-grid{display:grid;grid-template-columns:1.15fr .85fr;gap:14px}
+.kv{display:grid;grid-template-columns:150px 1fr;gap:8px 12px;font-size:12px}
+.kv div:nth-child(odd){color:#7990a3}
+.kv div:nth-child(even){color:#d7e3eb}
+.progress{
+  height:10px;border-radius:999px;background:#09141e;border:1px solid #1b3448;overflow:hidden
+}
+.progress > span{display:block;height:100%;background:linear-gradient(90deg,#258fc0,#5ec8f4);width:0}
+.stackbar{display:flex;height:36px;border-radius:10px;overflow:hidden;border:1px solid #2b4355}
+.stackbar span{display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#081018}
+.seg1{background:#7be495}.seg2{background:#63d2ff}.seg3{background:#9aa7ff}.seg4{background:#d2a8ff}.seg5{background:#f6c15f}.segFail{background:#ff8a92}
+.console{
+  background:#050d13;border:1px solid #193040;border-radius:14px;padding:13px;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;
+  min-height:180px;max-height:280px;overflow:auto;color:#acc8d8
+}
+.console .ok{color:#84e99b}.console .err{color:#ff929b}.console .info{color:#77d8ff}.console .warn{color:#ffd177}
+.tabs{display:flex;gap:8px;flex-wrap:wrap;border-bottom:1px solid var(--line);padding-bottom:10px;margin-bottom:12px}
+.tabs button{border:0;background:#0a1722;color:#91a5b5;padding:8px 10px;border-radius:9px;cursor:pointer}
+.tabs button.active{background:#173047;color:#dff5ff}
+.mini-chart{height:210px;position:relative;border-radius:14px;background:#0a1722;border:1px solid #243d51;padding:12px}
+.bars{height:160px;display:flex;align-items:flex-end;gap:18px;padding:0 8px}
+.bar-group{flex:1;display:flex;align-items:flex-end;justify-content:center;gap:6px;height:100%}
+.bar{width:28px;border-radius:8px 8px 2px 2px;background:linear-gradient(180deg,#6ad6ff,#2d7ba2);position:relative}
+.bar.alt{background:linear-gradient(180deg,#8be69e,#397d4a)}
+.bar label{position:absolute;top:-20px;left:50%;transform:translateX(-50%);font-size:10px;color:#b4c7d5}
+.axis-labels{display:flex;justify-content:space-around;color:#73899b;font-size:10px}
+.fake-photo{
+  min-height:240px;border:1px solid #294358;border-radius:14px;display:grid;place-items:center;
+  background:
+    radial-gradient(circle at 50% 52%,#a4aeb4 0 7%,#6d767b 8% 12%,#3a4145 13% 24%,transparent 25%),
+    linear-gradient(145deg,#3a454c,#202b31 45%,#141c21);
+  position:relative;overflow:hidden
+}
+.fake-photo:after{
+  content:"FOTOGRAFÍA SIMULADA";position:absolute;bottom:10px;left:10px;
+  font-size:10px;letter-spacing:.12em;color:#cad4da;background:rgba(0,0,0,.35);padding:5px 8px;border-radius:8px
+}
+.heatmap{
+  min-height:240px;border:1px solid #294358;border-radius:14px;position:relative;overflow:hidden;
+  background:
+   radial-gradient(circle at 47% 50%,rgba(47,225,143,.9) 0 16%,transparent 17%),
+   radial-gradient(circle at 68% 35%,rgba(255,87,94,.86) 0 16%,transparent 17%),
+   radial-gradient(circle at 28% 67%,rgba(55,113,255,.9) 0 17%,transparent 18%),
+   radial-gradient(circle at 50% 50%,rgba(43,181,112,.65),rgba(33,88,120,.15) 55%,transparent 56%),
+   #0d1822;
+}
+.heatmap:before{
+  content:"";position:absolute;inset:42px 80px;border-radius:50%;border:22px solid rgba(155,220,206,.45);
+  box-shadow:0 0 30px rgba(77,213,178,.12)
+}
+.legend{display:flex;align-items:center;gap:8px;font-size:11px;color:#8fa3b4;margin-top:8px}
+.gradient{height:8px;flex:1;border-radius:999px;background:linear-gradient(90deg,#2267ff,#41d77a,#ff535d)}
+.flow{
+  display:flex;align-items:center;gap:8px;overflow:auto;padding:8px 0 2px
+}
+.flow .node{
+  min-width:126px;padding:10px 12px;border-radius:12px;border:1px solid #2b475c;background:#0d1c29;
+  font-size:11px;text-align:center;color:#cbd8e2
+}
+.flow .arrow{color:#58758a}
+.callout{
+  padding:14px 16px;border-left:3px solid var(--accent);background:rgba(83,199,255,.05);
+  border-radius:0 12px 12px 0;color:#a9bfcd;font-size:12px;line-height:1.5
+}
+.toast{
+  position:fixed;right:22px;bottom:22px;background:#102436;border:1px solid #315a74;
+  padding:12px 14px;border-radius:12px;color:#dff3ff;box-shadow:var(--shadow);
+  opacity:0;transform:translateY(8px);pointer-events:none;transition:.2s;z-index:99;font-size:12px
+}
+.toast.show{opacity:1;transform:none}
+.footer{margin-top:26px;color:#60788b;font-size:11px;text-align:center}
+@media(max-width:1100px){
+  .app{grid-template-columns:84px 1fr}
+  .brand .txt,.nav button span.label,.nav-title,.sidebar-note{display:none}
+  .sidebar{padding:16px 10px}
+  .nav button{justify-content:center}
+  .hero,.viewer-grid{grid-template-columns:1fr}
+  .grid-4{grid-template-columns:repeat(2,1fr)}
+}
+@media(max-width:760px){
+  .app{display:block}
+  .sidebar{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}
+  .brand{justify-content:center}
+  .nav{display:flex;overflow:auto;gap:6px}
+  .nav button{width:auto;min-width:44px}
+  .topbar{position:static;padding:14px 16px}
+  .content{padding:16px}
+  .grid-4,.grid-3,.grid-2,.form-grid{grid-template-columns:1fr}
+  .hero-main h3{font-size:23px}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="logo">
+        <svg viewBox="0 0 24 24" fill="none">
+          <path d="M12 2l2.2 3.1 3.8-.4.9 3.7 3.1 2.2-2.1 3.2.9 3.7-3.8.5L15 21.4 12 19l-3 2.4L7 18l-3.8-.5.9-3.7L2 10.6l3.1-2.2.9-3.7 3.8.4L12 2Z" stroke="#67d1ff" stroke-width="1.2"/>
+          <circle cx="12" cy="12" r="3.2" stroke="#9af0b0" stroke-width="1.2"/>
+        </svg>
+      </div>
+      <div class="txt"><h1>Agente-Ciel</h1><small>Digital Twin Research Console</small></div>
+    </div>
+
+    <div class="nav-title">Flujo experimental</div>
+    <nav class="nav">
+      <button class="active" data-target="dashboard"><span class="num">01</span><span class="label">Resumen</span></button>
+      <button data-target="dataset"><span class="num">02</span><span class="label">Dataset</span></button>
+      <button data-target="providers"><span class="num">03</span><span class="label">Proveedores IA</span></button>
+      <button data-target="generation"><span class="num">04</span><span class="label">Generación CAD</span></button>
+      <button data-target="validation"><span class="num">05</span><span class="label">Validación digital</span></button>
+      <button data-target="campaign"><span class="num">06</span><span class="label">Campaña</span></button>
+      <button data-target="manufacturing"><span class="num">07</span><span class="label">Manufactura</span></button>
+      <button data-target="scanning"><span class="num">08</span><span class="label">Escaneo 3D</span></button>
+      <button data-target="metrology"><span class="num">09</span><span class="label">Metrología</span></button>
+      <button data-target="results"><span class="num">10</span><span class="label">Resultados</span></button>
+      <button data-target="export"><span class="num">11</span><span class="label">Exportación</span></button>
+    </nav>
+
+    <div class="sidebar-note">
+      <strong>Modo demostración.</strong><br>
+      Todos los valores, métricas, archivos, fotografías y resultados de esta interfaz son ficticios y sirven únicamente para visualizar cómo podría operar el software terminado.
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div class="topbar-left">
+        <h2 id="pageTitle">Resumen del proyecto</h2>
+        <p>Proyecto: <strong>Experimento CAD-LLM 2026</strong> · Zona: America/Lima · Estado: simulación</p>
+      </div>
+      <div class="top-actions">
+        <span class="badge ok">● API conectada</span>
+        <span class="badge info">● Worker CAD listo</span>
+        <span class="badge warn">● Escáner en espera</span>
+        <button class="btn" onclick="toast('Simulación guardada correctamente')">Guardar sesión</button>
+      </div>
+    </header>
+
+    <div class="content">
+
+      <!-- DASHBOARD -->
+      <section class="section active" id="dashboard">
+        <div class="hero">
+          <div class="card hero-main">
+            <div class="kicker">Closed-loop Text-to-Physical CAD</div>
+            <h3>Del requisito en lenguaje natural a la pieza física medible.</h3>
+            <p>
+              Este prototipo simula el flujo completo de Agente-Ciel: generación de código CadQuery,
+              ejecución aislada, autocorrección, validación B-Rep/STL, fabricación, escaneo óptico,
+              registro ICP, metrología y exportación de resultados científicos.
+            </p>
+            <div class="flow" style="margin-top:20px">
+              <div class="node">Prompt</div><div class="arrow">→</div>
+              <div class="node">LLM</div><div class="arrow">→</div>
+              <div class="node">CadQuery</div><div class="arrow">→</div>
+              <div class="node">Sandbox</div><div class="arrow">→</div>
+              <div class="node">STL</div><div class="arrow">→</div>
+              <div class="node">Impresión</div><div class="arrow">→</div>
+              <div class="node">Escaneo</div><div class="arrow">→</div>
+              <div class="node">ICP</div><div class="arrow">→</div>
+              <div class="node">Metrología</div>
+            </div>
+          </div>
+          <div class="card hero-side">
+            <div class="kicker">Ejecución actual</div>
+            <div style="font-size:22px;font-weight:800;margin:8px 0 4px">CAD-ENG-021</div>
+            <div class="small">Engranaje recto, 20 dientes, m=2, espesor 8 mm, agujero 10 mm</div>
+            <div style="height:14px"></div>
+            <div class="progress"><span style="width:78%"></span></div>
+            <div style="display:flex;justify-content:space-between;margin-top:8px" class="small">
+              <span>Metrología</span><span>78%</span>
+            </div>
+            <div style="height:14px"></div>
+            <div class="kv">
+              <div>Modo</div><div>Closed-loop</div>
+              <div>Proveedor</div><div>OpenAI / modelo configurado</div>
+              <div>Primer éxito</div><div>Intento 3</div>
+              <div>Specimen</div><div class="mono">AGC-ENG-021-FDM-R01</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid-4">
+          <div class="card metric"><div class="label">Prompts del dataset</div><div class="value">90</div><div class="delta">30 básicos · 30 intermedios · 30 complejos</div></div>
+          <div class="card metric"><div class="label">Compile Rate closed-loop</div><div class="value">91.1%</div><div class="delta">Valor ficticio de demostración</div></div>
+          <div class="card metric"><div class="label">STL aptos</div><div class="value">79</div><div class="delta">87.8% de la cohorte simulada</div></div>
+          <div class="card metric"><div class="label">Piezas metrológicas</div><div class="value">10</div><div class="delta">FDM: 8 · SLA/DLP: 2</div></div>
+        </div>
+
+        <div class="grid-2" style="margin-top:14px">
+          <div class="card pad">
+            <div class="section-head"><div><h3>Estado del pipeline</h3><p>Resumen de la trazabilidad de la ejecución activa.</p></div></div>
+            <div class="timeline">
+              <div class="step ok"><div class="dot">✓</div><div><h4>Prompt congelado</h4><p>Especificación y cotas críticas aprobadas.</p></div><span class="chip ok">Completo</span></div>
+              <div class="step ok"><div class="dot">✓</div><div><h4>Generación y debugger</h4><p>Éxito CAD en el intento 3. Los intentos fallidos se conservaron.</p></div><span class="chip ok">Completo</span></div>
+              <div class="step ok"><div class="dot">✓</div><div><h4>Topología STL</h4><p>Watertight, volumen positivo, DangEL = 0.</p></div><span class="chip ok">Completo</span></div>
+              <div class="step ok"><div class="dot">✓</div><div><h4>Fabricación FDM</h4><p>Specimen AGC-ENG-021-FDM-R01 fabricado y fotografiado.</p></div><span class="chip ok">Completo</span></div>
+              <div class="step warn"><div class="dot">↻</div><div><h4>Metrología</h4><p>Registro ICP aprobado; faltan dos cotas para cerrar el análisis.</p></div><span class="chip warn">En curso</span></div>
+            </div>
+          </div>
+          <div class="card pad">
+            <div class="section-head"><div><h3>Actividad reciente</h3><p>Eventos simulados del sistema.</p></div></div>
+            <div class="console" id="dashboardConsole">
+              <div class="info">[11:31:04] RUN-021-CL intento 3 iniciado.</div>
+              <div class="ok">[11:31:07] Script ejecutado sin excepción.</div>
+              <div class="ok">[11:31:08] B-Rep válido · sólidos=1 · volumen=16315.2 mm³.</div>
+              <div class="ok">[11:31:09] STEP y STL exportados y verificados.</div>
+              <div class="ok">[11:31:11] Topología: watertight=true · DangEL=0.</div>
+              <div class="info">[11:48:26] Specimen AGC-ENG-021-FDM-R01 vinculado.</div>
+              <div class="info">[12:04:14] ScanSession SCAN-021-01 importado: 2,486,192 puntos.</div>
+              <div class="ok">[12:11:33] ICP aprobado · fitness=0.971 · RMSE=0.083 mm.</div>
+              <div class="warn">[12:13:02] Metrología: 2/4 cotas críticas evaluadas.</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- DATASET -->
+      <section class="section" id="dataset">
+        <div class="section-head">
+          <div><h3>Dataset científico</h3><p>Prompts versionados, complejidad, cotas, referencias y congelación experimental.</p></div>
+          <div class="toolbar"><button class="btn">Importar CSV</button><button class="btn">Importar JSON</button><button class="btn primary" onclick="toast('Versión DS-2026.10 congelada')">Congelar versión</button></div>
+        </div>
+
+        <div class="grid-4">
+          <div class="card metric"><div class="label">Casos</div><div class="value">90</div><div class="delta">Cobertura objetivo completa</div></div>
+          <div class="card metric"><div class="label">Básicos</div><div class="value">30</div><div class="delta">33.3%</div></div>
+          <div class="card metric"><div class="label">Intermedios</div><div class="value">30</div><div class="delta">33.3%</div></div>
+          <div class="card metric"><div class="label">Complejos</div><div class="value">30</div><div class="delta">33.3%</div></div>
+        </div>
+
+        <div class="card pad" style="margin-top:14px">
+          <div class="form-grid">
+            <div class="field"><label>Nombre de la versión</label><input value="DS-2026.10-evaluacion"></div>
+            <div class="field"><label>Finalidad</label><select><option>Evaluación</option><option>Desarrollo</option></select></div>
+            <div class="field"><label>Unidad canónica</label><select><option>Milímetros (mm)</option></select></div>
+            <div class="field"><label>Estado</label><select><option>Borrador</option><option>Congelado</option></select></div>
+          </div>
+        </div>
+
+        <div class="card pad" style="margin-top:14px">
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>ID</th><th>Prompt</th><th>Familia</th><th>Complejidad</th><th>Cotas</th><th>Ground Truth</th><th>Estado</th></tr></thead>
+              <tbody>
+                <tr><td class="mono">CAD-001</td><td>Cubo 30×30×30 mm con agujero Ø10 mm.</td><td>Primitiva</td><td><span class="chip ok">Básico</span></td><td>4</td><td>GT-001.step</td><td><span class="chip info">Listo</span></td></tr>
+                <tr><td class="mono">CAD-021</td><td>Engranaje recto de 20 dientes, módulo 2, espesor 8 mm y agujero Ø10 mm.</td><td>Engranaje</td><td><span class="chip warn">Intermedio</span></td><td>4</td><td>GT-021.step</td><td><span class="chip info">Listo</span></td></tr>
+                <tr><td class="mono">CAD-048</td><td>Carcasa rectangular con cavidad interna, tapa y cuatro torretas.</td><td>Carcasa</td><td><span class="chip warn">Intermedio</span></td><td>7</td><td>GT-048.step</td><td><span class="chip info">Listo</span></td></tr>
+                <tr><td class="mono">CAD-076</td><td>Soporte curvo adaptativo con patrón aligerado y encajes laterales.</td><td>Adaptativa</td><td><span class="chip err">Complejo</span></td><td>9</td><td>Sin referencia</td><td><span class="chip warn">IoU N/A</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- PROVIDERS -->
+      <section class="section" id="providers">
+        <div class="section-head">
+          <div><h3>Proveedores de IA</h3><p>Perfiles intercambiables, capacidades, presupuesto y procedencia de cada ejecución.</p></div>
+          <button class="btn primary" onclick="toast('Prueba de conectividad simulada: OK')">Probar conexiones</button>
+        </div>
+
+        <div class="grid-3">
+          <div class="card pad">
+            <div style="display:flex;justify-content:space-between"><strong>OpenAI</strong><span class="chip ok">Conectado</span></div>
+            <div class="small" style="margin-top:8px">Ruta principal de API pagada para el prototipo.</div>
+            <div class="kv" style="margin-top:14px"><div>Temperatura</div><div>0.2</div><div>Top-P</div><div>0.9</div><div>Timeout</div><div>90 s</div><div>Presupuesto</div><div>US$ 25.00</div></div>
+          </div>
+          <div class="card pad">
+            <div style="display:flex;justify-content:space-between"><strong>Ollama</strong><span class="chip ok">Disponible</span></div>
+            <div class="small" style="margin-top:8px">Qwen2.5-Coder-7B-Instruct · servidor universitario.</div>
+            <div class="kv" style="margin-top:14px"><div>GPU</div><div>RTX 4090 24 GB</div><div>Concurrencia</div><div>1</div><div>Red</div><div>Privada</div><div>Fallback cloud</div><div>No</div></div>
+          </div>
+          <div class="card pad">
+            <div style="display:flex;justify-content:space-between"><strong>Anthropic / DeepSeek / OpenRouter / NVIDIA</strong><span class="chip warn">Mixto</span></div>
+            <div class="small" style="margin-top:8px">Adaptadores previstos; algunos sin prueba en vivo en esta simulación.</div>
+            <div class="kv" style="margin-top:14px"><div>Contrato</div><div>Normalizado</div><div>Errores</div><div>Separados</div><div>Modelo</div><div>Configurable</div><div>Semilla</div><div>Según soporte</div></div>
+          </div>
+        </div>
+
+        <div class="card pad" style="margin-top:14px">
+          <div class="callout">La simulación diferencia valor solicitado, valor aplicado y parámetro no compatible. Cambiar de proveedor a mitad de una ejecución crea una ejecución nueva; nunca se hace un fallback silencioso.</div>
+          <div class="table-wrap" style="margin-top:14px">
+            <table>
+              <thead><tr><th>Proveedor</th><th>Perfil</th><th>Modelo</th><th>Temperatura</th><th>Top-P</th><th>Costo</th><th>Estado</th></tr></thead>
+              <tbody>
+                <tr><td>OpenAI</td><td>remote-primary</td><td>modelo-configurado</td><td>0.2</td><td>0.9</td><td>Disponible</td><td><span class="chip ok">Verificado</span></td></tr>
+                <tr><td>Ollama</td><td>local-qwen</td><td>Qwen2.5-Coder-7B</td><td>0.2</td><td>0.9</td><td>Local</td><td><span class="chip ok">Verificado</span></td></tr>
+                <tr><td>OpenRouter</td><td>route-fixed</td><td>configurable</td><td>0.2</td><td>0.9</td><td>Variable</td><td><span class="chip warn">No probado</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- GENERATION -->
+      <section class="section" id="generation">
+        <div class="section-head">
+          <div><h3>Generación CAD y debugger</h3><p>Simulación de la ejecución closed-loop con historial de intentos.</p></div>
+          <div class="toolbar"><button class="btn" onclick="resetGeneration()">Reiniciar</button><button class="btn primary" onclick="runGeneration()">Simular generación</button></div>
+        </div>
+
+        <div class="grid-2">
+          <div class="card pad">
+            <div class="field"><label>Prompt original</label><textarea id="promptBox">Crear un engranaje recto de 20 dientes, módulo 2 mm, espesor 8 mm y agujero central de 10 mm.</textarea></div>
+            <div class="form-grid" style="margin-top:12px">
+              <div class="field"><label>Proveedor</label><select><option>OpenAI · remote-primary</option><option>Ollama · local-qwen</option></select></div>
+              <div class="field"><label>Modo</label><select><option>Closed-loop · máximo 5 intentos</option><option>Open-loop · 1 intento</option></select></div>
+              <div class="field"><label>Unidad</label><select><option>mm</option></select></div>
+              <div class="field"><label>Complejidad</label><select><option>Intermedia</option><option>Básica</option><option>Compleja</option></select></div>
+            </div>
+            <div class="section-head" style="margin-top:18px"><div><h3 style="font-size:15px">Especificación estructurada</h3></div></div>
+            <div class="table-wrap">
+              <table style="min-width:0">
+                <tbody>
+                  <tr><th>Cota</th><th>Nominal</th><th>Tolerancia</th></tr>
+                  <tr><td>Número de dientes</td><td>20</td><td>Exacto</td></tr>
+                  <tr><td>Módulo</td><td>2.00 mm</td><td>±0.02 mm</td></tr>
+                  <tr><td>Espesor</td><td>8.00 mm</td><td>±0.10 mm</td></tr>
+                  <tr><td>Agujero</td><td>10.00 mm</td><td>±0.08 mm</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="card pad">
+            <div class="kicker">Script final simulado</div>
+            <div class="code" id="codeBox"># Esperando simulación...
+# El script generado aparecerá aquí.</div>
+          </div>
+        </div>
+
+        <div class="grid-2" style="margin-top:14px">
+          <div class="card pad">
+            <div class="section-head"><div><h3 style="font-size:17px">Intentos</h3><p>El sistema conserva éxitos y fallos.</p></div></div>
+            <div class="timeline" id="attemptTimeline">
+              <div class="step"><div class="dot">1</div><div><h4>Pendiente</h4><p>Presione “Simular generación”.</p></div><span class="chip">No iniciado</span></div>
+            </div>
+          </div>
+          <div class="card pad">
+            <div class="section-head"><div><h3 style="font-size:17px">Sandbox</h3><p>Salida de ejecución ficticia.</p></div></div>
+            <div class="console" id="genConsole"><div class="info">[sandbox] esperando script...</div></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- VALIDATION -->
+      <section class="section" id="validation">
+        <div class="section-head">
+          <div><h3>Validación digital</h3><p>B-Rep, exportación, topología STL y comparación con ground truth.</p></div>
+          <button class="btn primary" onclick="toast('Validación recalculada con el mismo artefacto congelado')">Recalcular</button>
+        </div>
+
+        <div class="viewer-grid">
+          <div class="card pad">
+            <div class="viewer">
+              <svg viewBox="0 0 600 360" role="img" aria-label="Engranaje simulado">
+                <defs>
+                  <radialGradient id="g1"><stop offset="0" stop-color="#76ddff"/><stop offset="1" stop-color="#1c638a"/></radialGradient>
+                </defs>
+                <g transform="translate(300 180)">
+                  <circle r="92" fill="url(#g1)" opacity=".26" stroke="#6ee0ff" stroke-width="2"/>
+                  <circle r="35" fill="#071018" stroke="#7ff0ae" stroke-width="4"/>
+                  <g fill="#2d9bc4" stroke="#7edfff" stroke-width="1.2">
+                    <rect x="-10" y="-132" width="20" height="34" rx="3"/>
+                    <rect x="-10" y="98" width="20" height="34" rx="3"/>
+                    <rect x="-132" y="-10" width="34" height="20" rx="3"/>
+                    <rect x="98" y="-10" width="34" height="20" rx="3"/>
+                    <rect x="-10" y="-132" width="20" height="34" rx="3" transform="rotate(45)"/>
+                    <rect x="-10" y="-132" width="20" height="34" rx="3" transform="rotate(90)"/>
+                    <rect x="-10" y="-132" width="20" height="34" rx="3" transform="rotate(135)"/>
+                    <rect x="-10" y="-132" width="20" height="34" rx="3" transform="rotate(180)"/>
+                    <rect x="-10" y="-132" width="20" height="34" rx="3" transform="rotate(225)"/>
+                    <rect x="-10" y="-132" width="20" height="34" rx="3" transform="rotate(270)"/>
+                    <rect x="-10" y="-132" width="20" height="34" rx="3" transform="rotate(315)"/>
+                  </g>
+                </g>
+              </svg>
+              <div class="hint">Visor 3D simulado · órbita, ejes y selección no implementados</div>
+            </div>
+          </div>
+          <div class="card pad">
+            <div class="kicker">GeometryRevision #38</div>
+            <div class="kv" style="margin-top:12px">
+              <div>result</div><div><span class="chip ok">Existe</span></div>
+              <div>Sólidos</div><div>1 / esperado 1</div>
+              <div>Volumen</div><div>16 315.2 mm³</div>
+              <div>Área</div><div>8 744.9 mm²</div>
+              <div>B-Rep</div><div><span class="chip ok">Válido</span></div>
+              <div>STEP</div><div><span class="chip ok">Recargado</span></div>
+              <div>STL</div><div><span class="chip ok">Recargado</span></div>
+              <div>Watertight</div><div><span class="chip ok">Sí</span></div>
+              <div>DangEL</div><div>0</div>
+              <div>Orientación</div><div>Consistente</div>
+              <div>Componentes</div><div>1</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid-4" style="margin-top:14px">
+          <div class="card metric"><div class="label">IoU B-Rep</div><div class="value">0.962</div><div class="delta">vs GT-021.step</div></div>
+          <div class="card metric"><div class="label">Chamfer digital</div><div class="value">0.0061</div><div class="delta">mm² · 8,192 puntos</div></div>
+          <div class="card metric"><div class="label">Error volumen</div><div class="value">1.7%</div><div class="delta">Diferencia absoluta simulada</div></div>
+          <div class="card metric"><div class="label">Aptitud</div><div class="value" style="font-size:22px">APTO</div><div class="delta">Para revisión de fabricación</div></div>
+        </div>
+      </section>
+
+      <!-- CAMPAIGN -->
+      <section class="section" id="campaign">
+        <div class="section-head">
+          <div><h3>Campaña comparativa</h3><p>Open-loop vs closed-loop, denominadores explícitos y rescates por iteración.</p></div>
+          <div class="toolbar"><button class="btn">Pausar</button><button class="btn primary" onclick="toast('Campaña simulada reanudada')">Reanudar</button></div>
+        </div>
+
+        <div class="grid-4">
+          <div class="card metric"><div class="label">Ejecuciones lógicas</div><div class="value">180</div><div class="delta">90 open + 90 closed</div></div>
+          <div class="card metric"><div class="label">Máximo de generaciones</div><div class="value">540</div><div class="delta">Incluye hasta 5 closed-loop</div></div>
+          <div class="card metric"><div class="label">Costo estimado</div><div class="value">$18.42</div><div class="delta">Ficticio</div></div>
+          <div class="card metric"><div class="label">Progreso</div><div class="value">100%</div><div class="delta">Simulación finalizada</div></div>
+        </div>
+
+        <div class="card pad" style="margin-top:14px">
+          <div class="section-head"><div><h3 style="font-size:17px">Compile Rate acumulado — cohorte closed-loop</h3><p>N = 90 ejecuciones evaluables.</p></div></div>
+          <div class="stackbar">
+            <span class="seg1" style="width:61%">I1 61%</span>
+            <span class="seg2" style="width:16%">I2 +16%</span>
+            <span class="seg3" style="width:8%">I3 +8%</span>
+            <span class="seg4" style="width:4%">I4 +4%</span>
+            <span class="seg5" style="width:2.1%">I5 +2.1%</span>
+            <span class="segFail" style="width:8.9%">8.9% fallo</span>
+          </div>
+          <div class="small" style="margin-top:10px">Valores ilustrativos. Los segmentos representan primer éxito por iteración, no cinco porcentajes independientes.</div>
+        </div>
+
+        <div class="grid-2" style="margin-top:14px">
+          <div class="card pad">
+            <div class="mini-chart">
+              <div class="bars">
+                <div class="bar-group"><div class="bar" style="height:98px"><label>61%</label></div><div class="bar alt" style="height:146px"><label>91%</label></div></div>
+                <div class="bar-group"><div class="bar" style="height:72px"><label>44%</label></div><div class="bar alt" style="height:126px"><label>78%</label></div></div>
+                <div class="bar-group"><div class="bar" style="height:48px"><label>29%</label></div><div class="bar alt" style="height:109px"><label>68%</label></div></div>
+              </div>
+              <div class="axis-labels"><span>Básico</span><span>Intermedio</span><span>Complejo</span></div>
+            </div>
+            <div class="legend"><span class="chip info">Open-loop</span><span class="chip ok">Closed-loop</span></div>
+          </div>
+          <div class="card pad">
+            <div class="table-wrap">
+              <table style="min-width:0">
+                <thead><tr><th>Métrica</th><th>Open</th><th>Closed</th></tr></thead>
+                <tbody>
+                  <tr><td>Compile Rate</td><td>61.1%</td><td>91.1%</td></tr>
+                  <tr><td>IR-CAD</td><td>42.2%</td><td>12.2%</td></tr>
+                  <tr><td>Éxito topológico</td><td>52.2%</td><td>87.8%</td></tr>
+                  <tr><td>Latencia mediana</td><td>8.2 s</td><td>17.6 s</td></tr>
+                  <tr><td>Costo medio/caso</td><td>$0.06</td><td>$0.14</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- MANUFACTURING -->
+      <section class="section" id="manufacturing">
+        <div class="section-head">
+          <div><h3>Manufactura y evidencia física</h3><p>Selección de muestra, perfiles de impresión, specimen, fotografías y trazabilidad del STL real.</p></div>
+          <button class="btn primary" onclick="toast('Specimen simulado marcado como listo para escaneo')">Actualizar estado</button>
+        </div>
+
+        <div class="grid-2">
+          <div class="card pad">
+            <div class="form-grid">
+              <div class="field"><label>Specimen</label><input value="AGC-ENG-021-FDM-R01" readonly></div>
+              <div class="field"><label>Tecnología</label><select><option>FDM</option><option>SLA/DLP</option></select></div>
+              <div class="field"><label>Impresora</label><select><option>Bambu Lab X1 Carbon</option><option>Flsun T1 Pro</option></select></div>
+              <div class="field"><label>Material</label><select><option>PLA</option><option>PETG</option></select></div>
+              <div class="field"><label>Altura de capa</label><input value="0.20 mm"></div>
+              <div class="field"><label>Relleno</label><input value="20% Gyroid"></div>
+              <div class="field"><label>Boquilla</label><input value="0.4 mm"></div>
+              <div class="field"><label>Escala</label><input value="1:1"></div>
+            </div>
+            <div class="callout" style="margin-top:14px">La UI diferencia el preset documental de los parámetros realmente usados en la máquina. Los valores reales deben ser confirmados por el operador.</div>
+          </div>
+
+          <div class="card pad">
+            <div class="fake-photo"></div>
+            <div class="kv" style="margin-top:14px">
+              <div>STL fuente</div><div class="mono">sha256:e73d...91a0</div>
+              <div>Estado</div><div><span class="chip ok">Fabricada</span></div>
+              <div>Tiempo real</div><div>1 h 14 min</div>
+              <div>Posprocesado</div><div>Retiro mecánico de soportes</div>
+              <div>Fotografías</div><div>3</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card pad" style="margin-top:14px">
+          <div class="timeline">
+            <div class="step ok"><div class="dot">✓</div><div><h4>Seleccionada</h4><p>Elegida por familia y complejidad para muestra física.</p></div><span class="chip ok">OK</span></div>
+            <div class="step ok"><div class="dot">✓</div><div><h4>Laminada</h4><p>Perfil FDM-PLA-0.20-v3 · orientación registrada.</p></div><span class="chip ok">OK</span></div>
+            <div class="step ok"><div class="dot">✓</div><div><h4>Fabricada</h4><p>Sin fallo de impresión declarado.</p></div><span class="chip ok">OK</span></div>
+            <div class="step ok"><div class="dot">✓</div><div><h4>Fotografiada</h4><p>Vista frontal, lateral y superior.</p></div><span class="chip ok">OK</span></div>
+            <div class="step warn"><div class="dot">5</div><div><h4>Lista para escaneo</h4><p>Esperando confirmación del operador de laboratorio.</p></div><span class="chip warn">Pendiente</span></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- SCANNING -->
+      <section class="section" id="scanning">
+        <div class="section-head">
+          <div><h3>Escaneo, preparación y registro</h3><p>Importación PLY/PCD, calibración, ROI, reducción y alineación rígida.</p></div>
+          <button class="btn primary" onclick="simulateICP()">Simular ICP</button>
+        </div>
+
+        <div class="grid-2">
+          <div class="card pad">
+            <div class="form-grid">
+              <div class="field"><label>Archivo</label><input value="AGC-ENG-021-FDM-R01_scan.ply"></div>
+              <div class="field"><label>Unidad</label><select><option>mm</option></select></div>
+              <div class="field"><label>Specimen</label><input value="AGC-ENG-021-FDM-R01"></div>
+              <div class="field"><label>Calibración</label><select><option>CAL-2026-10-01 · vigente</option></select></div>
+            </div>
+            <div class="kv" style="margin-top:16px">
+              <div>Puntos originales</div><div>2,486,192</div>
+              <div>Puntos tras ROI</div><div>1,904,661</div>
+              <div>Puntos de registro</div><div>82,000</div>
+              <div>Puntos de visualización</div><div>35,000</div>
+              <div>No finitos eliminados</div><div>0</div>
+            </div>
+          </div>
+
+          <div class="card pad">
+            <div class="viewer" style="min-height:300px">
+              <canvas id="scanCanvas" width="600" height="300" style="width:100%;height:300px"></canvas>
+              <div class="hint">Nube de puntos sintética · azul = scan · verde = CAD</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid-4" style="margin-top:14px">
+          <div class="card metric"><div class="label">Fitness ICP</div><div class="value" id="fitness">—</div><div class="delta">Objetivo demostrativo</div></div>
+          <div class="card metric"><div class="label">RMSE</div><div class="value" id="rmse">—</div><div class="delta">mm</div></div>
+          <div class="card metric"><div class="label">Iteraciones</div><div class="value" id="iters">—</div><div class="delta">Máx. 2000</div></div>
+          <div class="card metric"><div class="label">Aprobación</div><div class="value" id="icpStatus" style="font-size:20px">Pendiente</div><div class="delta">Revisión humana</div></div>
+        </div>
+
+        <div class="card pad" style="margin-top:14px">
+          <div class="console" id="icpConsole">
+            <div class="info">[scan] archivo PLY validado.</div>
+            <div class="info">[prep] unidad confirmada: mm.</div>
+            <div class="info">[prep] ROI y filtrado reproducible aplicados.</div>
+            <div class="warn">[registration] esperando ejecución ICP...</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- METROLOGY -->
+      <section class="section" id="metrology">
+        <div class="section-head">
+          <div><h3>Metrología física</h3><p>Chamfer, Hausdorff, cotas críticas, ΔD y mapa de desviación firmado.</p></div>
+          <button class="btn primary" onclick="toast('Métricas físicas recalculadas con el registro aprobado')">Recalcular métricas</button>
+        </div>
+
+        <div class="grid-4">
+          <div class="card metric"><div class="label">Hausdorff</div><div class="value">0.31</div><div class="delta">mm · peor caso discreto</div></div>
+          <div class="card metric"><div class="label">Chamfer físico</div><div class="value">0.0092</div><div class="delta">mm² · bidireccional</div></div>
+          <div class="card metric"><div class="label">ΔD medio</div><div class="value">0.153</div><div class="delta">mm · 4 cotas</div></div>
+          <div class="card metric"><div class="label">DE entre cotas</div><div class="value">0.064</div><div class="delta">mm · n=4</div></div>
+        </div>
+
+        <div class="grid-2" style="margin-top:14px">
+          <div class="card pad">
+            <div class="heatmap"></div>
+            <div class="legend"><span>-0.50 mm</span><div class="gradient"></div><span>+0.50 mm</span></div>
+            <div class="small" style="margin-top:8px">Banda nominal simulada: ±0.05 mm. La saturación de color no altera los valores originales.</div>
+          </div>
+          <div class="card pad">
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Cota</th><th>Objetivo</th><th>CAD</th><th>Física</th><th>ΔD</th><th>ΔD %</th><th>Método</th></tr></thead>
+                <tbody>
+                  <tr><td>Agujero central</td><td>10.000</td><td>10.002</td><td>9.872</td><td>0.128</td><td>1.28%</td><td>Ajuste de cilindro</td></tr>
+                  <tr><td>Espesor</td><td>8.000</td><td>8.000</td><td>7.910</td><td>0.090</td><td>1.13%</td><td>Dos planos</td></tr>
+                  <tr><td>Ø exterior</td><td>44.000</td><td>43.996</td><td>43.760</td><td>0.240</td><td>0.55%</td><td>Ajuste radial</td></tr>
+                  <tr><td>Distancia cara-cara</td><td>6.000</td><td>6.004</td><td>5.865</td><td>0.135</td><td>2.25%</td><td>Dos planos</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="callout" style="margin-top:12px">Estos números son ficticios. El software real debe conservar método, ROI, residual, puntos usados, transformación y evidencia de cada medición.</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- RESULTS -->
+      <section class="section" id="results">
+        <div class="section-head">
+          <div><h3>Resultados 4.1 · 4.2 · 4.3</h3><p>Vista consolidada de las salidas que alimentan el artículo científico.</p></div>
+          <div class="toolbar"><button class="btn">Borrador</button><button class="btn primary" onclick="toast('Paquete científico simulado generado')">Generar paquete</button></div>
+        </div>
+
+        <div class="tabs">
+          <button class="active" onclick="setResultTab('r41',this)">4.1 Digital</button>
+          <button onclick="setResultTab('r42',this)">4.2 Manufactura</button>
+          <button onclick="setResultTab('r43',this)">4.3 Metrología</button>
+        </div>
+
+        <div id="r41" class="result-panel">
+          <div class="grid-2">
+            <div class="card pad">
+              <div class="kicker">Figura — Compile Rate por iteración</div>
+              <div class="stackbar" style="margin-top:14px">
+                <span class="seg1" style="width:61%">61%</span>
+                <span class="seg2" style="width:16%">+16%</span>
+                <span class="seg3" style="width:8%">+8%</span>
+                <span class="seg4" style="width:4%">+4%</span>
+                <span class="seg5" style="width:2.1%">+2.1%</span>
+                <span class="segFail" style="width:8.9%">8.9%</span>
+              </div>
+              <div class="small" style="margin-top:12px">N = 90 · datos ficticios.</div>
+            </div>
+            <div class="card pad">
+              <div class="table-wrap">
+                <table style="min-width:0">
+                  <thead><tr><th>Modo</th><th>Compile Rate</th><th>IR-CAD</th><th>IoU</th><th>Chamfer</th></tr></thead>
+                  <tbody>
+                    <tr><td>Open-loop</td><td>61.1%</td><td>42.2%</td><td>0.887</td><td>0.015</td></tr>
+                    <tr><td>Closed-loop</td><td>91.1%</td><td>12.2%</td><td>0.938</td><td>0.008</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div id="r42" class="result-panel" style="display:none">
+          <div class="grid-2">
+            <div class="card pad">
+              <div class="fake-photo"></div>
+              <div class="small" style="margin-top:10px">Render CAD ↔ fotografía física del mismo specimen.</div>
+            </div>
+            <div class="card pad">
+              <div class="table-wrap">
+                <table style="min-width:0">
+                  <thead><tr><th>Grupo</th><th>STL</th><th>Watertight</th><th>DangEL=0</th><th>Apto</th></tr></thead>
+                  <tbody>
+                    <tr><td>Básico</td><td>30</td><td>29</td><td>29</td><td>96.7%</td></tr>
+                    <tr><td>Intermedio</td><td>28</td><td>25</td><td>25</td><td>89.3%</td></tr>
+                    <tr><td>Complejo</td><td>24</td><td>20</td><td>19</td><td>79.2%</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div id="r43" class="result-panel" style="display:none">
+          <div class="grid-2">
+            <div class="card pad">
+              <div class="heatmap"></div>
+              <div class="legend"><span>-0.50</span><div class="gradient"></div><span>+0.50 mm</span></div>
+            </div>
+            <div class="card pad">
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Specimen</th><th>dH max</th><th>Chamfer</th><th>ΔD medio</th><th>DE</th></tr></thead>
+                  <tbody>
+                    <tr><td>AGC-021-FDM-R01</td><td>0.31 mm</td><td>0.0092 mm²</td><td>0.153 mm</td><td>0.064 mm</td></tr>
+                    <tr><td>AGC-048-FDM-R01</td><td>0.42 mm</td><td>0.0131 mm²</td><td>0.188 mm</td><td>0.071 mm</td></tr>
+                    <tr><td>AGC-076-SLA-R01</td><td>0.18 mm</td><td>0.0048 mm²</td><td>0.071 mm</td><td>0.028 mm</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- EXPORT -->
+      <section class="section" id="export">
+        <div class="section-head">
+          <div><h3>Exportación reproducible</h3><p>Manifiesto, hashes, tablas, figuras y artefactos enlazados a la evidencia.</p></div>
+          <button class="btn primary" onclick="fakeDownload()">Simular exportación</button>
+        </div>
+
+        <div class="grid-2">
+          <div class="card pad">
+            <div class="kicker">Estructura del paquete</div>
+            <div class="code" style="max-height:none">experimento_2026/
+├── dataset/
+│   ├── prompts.csv
+│   └── dataset_manifest.json
+├── generations/
+│   ├── scripts/
+│   ├── step/
+│   └── stl/
+├── scans/
+│   ├── originals/
+│   └── processed/
+├── metrics/
+│   ├── digital_metrics.csv
+│   ├── manufacturability.csv
+│   └── metrology.csv
+├── figures/
+│   ├── compile_rate.svg
+│   ├── cad_vs_print.png
+│   └── deviation_heatmaps.png
+├── results.json
+├── column_dictionary.md
+└── manifest.json</div>
+          </div>
+
+          <div class="card pad">
+            <div class="kicker">Manifiesto simulado</div>
+            <div class="code" style="max-height:none">{
+  "project": "Experimento CAD-LLM 2026",
+  "dataset_version": "DS-2026.10-evaluacion",
+  "software_version": "0.9.0-demo",
+  "git_commit": "a3f91c7",
+  "provider": "OpenAI",
+  "generation_mode": "closed-loop",
+  "max_attempts_total": 5,
+  "unit": "mm",
+  "artifact_hash_algorithm": "SHA-256",
+  "scientific_outputs": [
+    "digital_metrics.csv",
+    "manufacturability.csv",
+    "metrology.csv",
+    "compile_rate.svg",
+    "deviation_heatmaps.png"
+  ],
+  "warning": "Todos los datos de esta demo son ficticios."
+}</div>
+          </div>
+        </div>
+
+        <div class="card pad" style="margin-top:14px">
+          <div class="callout">Una exportación final real debería poder rastrear cada fila y figura hasta el prompt, proveedor/modelo, intento, script, geometría, STL, pieza física, escaneo, transformación ICP y conjunto de mediciones que la originaron.</div>
+        </div>
+      </section>
+
+      <div class="footer">Agente-Ciel UI Concept · Simulación académica · Los datos mostrados no representan resultados experimentales reales.</div>
+    </div>
+  </main>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const titles = {
+  dashboard:"Resumen del proyecto",
+  dataset:"Dataset científico",
+  providers:"Proveedores de IA",
+  generation:"Generación CAD y debugger",
+  validation:"Validación digital",
+  campaign:"Campaña comparativa",
+  manufacturing:"Manufactura",
+  scanning:"Escaneo y registro",
+  metrology:"Metrología",
+  results:"Resultados científicos",
+  export:"Exportación reproducible"
+};
+
+document.querySelectorAll(".nav button").forEach(btn=>{
+  btn.addEventListener("click",()=>{
+    document.querySelectorAll(".nav button").forEach(b=>b.classList.remove("active"));
+    btn.classList.add("active");
+    document.querySelectorAll(".section").forEach(s=>s.classList.remove("active"));
+    const id=btn.dataset.target;
+    document.getElementById(id).classList.add("active");
+    document.getElementById("pageTitle").textContent=titles[id] || "Agente-Ciel";
+    if(id==="scanning") drawScan(false);
+    window.scrollTo({top:0,behavior:"smooth"});
+  });
+});
+
+function toast(msg){
+  const t=document.getElementById("toast");
+  t.textContent=msg;t.classList.add("show");
+  setTimeout(()=>t.classList.remove("show"),2200);
+}
+
+function resetGeneration(){
+  document.getElementById("attemptTimeline").innerHTML='<div class="step"><div class="dot">1</div><div><h4>Pendiente</h4><p>Presione “Simular generación”.</p></div><span class="chip">No iniciado</span></div>';
+  document.getElementById("genConsole").innerHTML='<div class="info">[sandbox] esperando script...</div>';
+  document.getElementById("codeBox").textContent="# Esperando simulación...\n# El script generado aparecerá aquí.";
+  toast("Generación reiniciada");
+}
+
+function runGeneration(){
+  const timeline=document.getElementById("attemptTimeline");
+  const consoleEl=document.getElementById("genConsole");
+  timeline.innerHTML="";
+  consoleEl.innerHTML="";
+  const attempts=[
+    {cls:"err",title:"Intento 1 — fallo de kernel",desc:"El script ejecutó, pero OpenCASCADE rechazó una operación booleana.",badge:"Reparable",bcls:"err"},
+    {cls:"err",title:"Intento 2 — geometría inválida",desc:"Se obtuvo result, pero el sólido contenía una intersección inválida.",badge:"Reparable",bcls:"err"},
+    {cls:"ok",title:"Intento 3 — CAD válido",desc:"Ejecución correcta, B-Rep válido, exportación STEP/STL exitosa.",badge:"Éxito",bcls:"ok"}
+  ];
+  const log=[
+    '<div class="info">[attempt 1] respuesta LLM recibida · 1,184 tokens.</div>',
+    '<div class="err">[attempt 1] BRep_API: command not done.</div>',
+    '<div class="warn">[debugger] traceback saneado y reenviado.</div>',
+    '<div class="info">[attempt 2] script reparado recibido.</div>',
+    '<div class="err">[attempt 2] result inválido: self-intersection detectada.</div>',
+    '<div class="warn">[debugger] diagnóstico geométrico reenviado.</div>',
+    '<div class="info">[attempt 3] script reparado recibido.</div>',
+    '<div class="ok">[attempt 3] Python exit code 0.</div>',
+    '<div class="ok">[attempt 3] B-Rep válido · sólidos=1 · volumen=16315.2 mm³.</div>',
+    '<div class="ok">[attempt 3] STEP/STL exportados y recargados.</div>',
+    '<div class="ok">[topology] watertight=true · DangEL=0.</div>'
+  ];
+  attempts.forEach((a,i)=>{
+    setTimeout(()=>{
+      timeline.insertAdjacentHTML("beforeend",`<div class="step ${a.cls}"><div class="dot">${i+1}</div><div><h4>${a.title}</h4><p>${a.desc}</p></div><span class="chip ${a.bcls}">${a.badge}</span></div>`);
+      consoleEl.insertAdjacentHTML("beforeend",log[i*3]||"");
+      if(log[i*3+1]) consoleEl.insertAdjacentHTML("beforeend",log[i*3+1]);
+      if(log[i*3+2]) consoleEl.insertAdjacentHTML("beforeend",log[i*3+2]);
+      consoleEl.scrollTop=consoleEl.scrollHeight;
+      if(i===2){
+        document.getElementById("codeBox").textContent=`import cadquery as cq
+
+# Parámetros declarados
+teeth = 20
+module = 2.0      # mm
+thickness = 8.0   # mm
+bore_diameter = 10.0  # mm
+
+# Geometría ilustrativa simplificada
+pitch_diameter = teeth * module
+outer_diameter = pitch_diameter + 2 * module
+
+gear_blank = (
+    cq.Workplane("XY")
+    .circle(outer_diameter / 2)
+    .extrude(thickness)
+)
+
+bore = (
+    cq.Workplane("XY")
+    .circle(bore_diameter / 2)
+    .extrude(thickness)
+)
+
+result = gear_blank.cut(bore)
+
+# En el sistema real, el runner controla
+# STEP/STL, validación y trazabilidad.`;
+        log.slice(9).forEach(x=>consoleEl.insertAdjacentHTML("beforeend",x));
+        toast("Simulación completada: éxito en intento 3");
+      }
+    },700*i);
+  });
+}
+
+function drawScan(aligned=false){
+  const c=document.getElementById("scanCanvas");
+  if(!c) return;
+  const ctx=c.getContext("2d");
+  ctx.clearRect(0,0,c.width,c.height);
+  ctx.fillStyle="#08141e";ctx.fillRect(0,0,c.width,c.height);
+  ctx.strokeStyle="rgba(255,255,255,.05)";
+  for(let x=0;x<c.width;x+=30){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,c.height);ctx.stroke()}
+  for(let y=0;y<c.height;y+=30){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(c.width,y);ctx.stroke()}
+  function cloud(cx,cy,r,color,offset=0){
+    ctx.fillStyle=color;
+    for(let i=0;i<760;i++){
+      const a=(i*0.173)+offset;
+      const rr=r*(0.65+0.35*Math.sin(i*1.37)**2);
+      const teeth=1+0.10*Math.sin(20*a);
+      const x=cx+Math.cos(a)*rr*teeth + Math.sin(i*2.2)*1.2;
+      const y=cy+Math.sin(a)*rr*teeth + Math.cos(i*1.8)*1.2;
+      ctx.globalAlpha=.72;
+      ctx.fillRect(x,y,1.5,1.5);
+    }
+    ctx.globalAlpha=1;
+  }
+  cloud(300,150,88,"#70eb9c",0);
+  cloud(aligned?302:332,aligned?151:132,88,"#5dcaff",aligned?.01:.07);
+  ctx.fillStyle="#90a9ba";ctx.font="12px sans-serif";
+  ctx.fillText(aligned?"Registro simulado alineado":"Antes de ICP: desplazamiento visible",14,22);
+}
+
+function simulateICP(){
+  drawScan(true);
+  document.getElementById("fitness").textContent="0.971";
+  document.getElementById("rmse").textContent="0.083";
+  document.getElementById("iters").textContent="184";
+  document.getElementById("icpStatus").textContent="Aprobado";
+  document.getElementById("icpConsole").innerHTML=`
+    <div class="info">[registration] inicialización por 4 correspondencias manuales.</div>
+    <div class="info">[ICP] threshold=0.5 mm · max_iteration=2000.</div>
+    <div class="ok">[ICP] convergencia alcanzada en 184 iteraciones.</div>
+    <div class="ok">[ICP] fitness=0.971 · RMSE=0.083 mm.</div>
+    <div class="ok">[QC] transformación rígida válida · sin escala.</div>
+    <div class="ok">[QC] revisión humana simulada: APROBADO.</div>`;
+  toast("ICP simulado completado");
+}
+
+function setResultTab(id,el){
+  document.querySelectorAll(".result-panel").forEach(p=>p.style.display="none");
+  document.getElementById(id).style.display="block";
+  document.querySelectorAll(".tabs button").forEach(b=>b.classList.remove("active"));
+  el.classList.add("active");
+}
+
+function fakeDownload(){
+  const payload = {
+    project:"Experimento CAD-LLM 2026",
+    generated_at:new Date().toISOString(),
+    mode:"demo",
+    warning:"Datos ficticios; no usar como resultados científicos."
+  };
+  const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=url;a.download="agente-ciel-demo-manifest.json";a.click();
+  URL.revokeObjectURL(url);
+  toast("Manifiesto demo generado");
+}
+
+drawScan(false);
+</script>
+</body>
+</html>
