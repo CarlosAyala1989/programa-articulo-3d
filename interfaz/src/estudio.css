@@ -1,0 +1,88 @@
+.investigacion { margin-top: 24px; background: var(--superficie); border: 1px solid var(--borde); border-radius: 16px; padding: 28px; box-shadow: var(--sombra); animation: aparecer 350ms ease-out both; }
+.investigacion .titulo-seccion { margin-bottom: 20px; }
+.investigacion .separacion { border-top: 1px solid var(--linea); padding-top: 30px; margin-top: 34px; }
+.resumen-dataset { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 16px 0; }
+.resumen-dataset > div { min-width: 0; background: var(--superficie-suave); border: 1px solid var(--linea); border-radius: 9px; padding: 16px; }
+.resumen-dataset small { display: block; color: var(--tenue); font-size: 9px; letter-spacing: .5px; margin-bottom: 8px; }
+.resumen-dataset strong, .resumen-dataset code { color: var(--texto); font-size: 13px; font-weight: 550; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.resumen-dataset code { font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace; font-size: 11px; }
+.enlaces { display: flex; gap: 18px; flex-wrap: wrap; margin: 16px 0; }
+.enlaces a { color: var(--azul); text-decoration: none; font-size: 12px; line-height: 1.5; }
+.enlaces a:hover { text-decoration: underline; text-underline-offset: 3px; }
+.lista-casos { display: grid; gap: 8px; margin-top: 22px; }
+.lista-casos details { border: 1px solid var(--borde); border-radius: 8px; overflow: hidden; }
+.lista-casos summary { cursor: pointer; padding: 14px 16px; font-size: 11px; font-weight: 600; letter-spacing: .3px; color: var(--texto); background: var(--superficie-suave); }
+.lista-casos summary:hover { background: var(--superficie-hover); }
+.lista-casos summary::marker { color: var(--tenue); font-size: 10px; }
+.casos-interior { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 14px; border-top: 1px solid var(--borde); }
+.caso { min-width: 0; border: 1px solid var(--borde); background: var(--superficie); border-radius: 8px; padding: 16px; }
+.caso > div { display: flex; align-items: center; gap: 10px; }
+.caso strong { color: var(--rojo); font-size: 12px; font-weight: 650; }
+.caso span { text-transform: capitalize; font-size: 11px; color: var(--secundario); }
+.caso p { font-size: 12px; line-height: 1.7; color: var(--texto); }
+.caso small { display: block; color: var(--secundario); font-size: 10px; line-height: 1.6; }
+.caso button, .enlace-boton { border: 0; background: none; color: var(--azul); padding: 4px 0; margin-top: 12px; font-size: 11px; text-decoration: none; text-align: left; cursor: pointer; }
+.caso button:hover, .enlace-boton:hover { text-decoration: underline; text-underline-offset: 3px; }
+.panel-campana, .panel-resultados { background: var(--superficie); border: 1px solid var(--borde); border-radius: 10px; padding: 24px; }
+.panel-campana > .campos:first-child { margin-top: 0; }
+.panel-campana input:not([type='checkbox']) { width: 100%; min-height: 42px; padding: 0 11px; font-size: 12px; }
+.campos-tres { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.matriz-opciones { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 22px 0; }
+.alternador { margin: 0; border: 1px solid var(--borde); background: var(--superficie-suave); border-radius: 8px; padding: 12px 14px; min-width: 0; }
+.alternador legend { padding: 0 6px; color: var(--secundario); font-size: 11px; font-weight: 550; }
+.opcion-check { display: flex; align-items: center; gap: 8px; font-size: 12px; line-height: 1.5; font-weight: 400; letter-spacing: 0; color: var(--texto); margin: 8px 0; cursor: pointer; }
+.opcion-check input { accent-color: var(--azul); width: 15px; height: 15px; margin: 0; flex-shrink: 0; }
+.opcion-check input:focus-visible { outline: 2px solid var(--foco); outline-offset: 3px; }
+.seleccion-casos > div { display: flex; flex-wrap: wrap; gap: 4px 14px; max-height: 156px; overflow: auto; border: 1px solid var(--borde); border-radius: 8px; padding: 14px; background: var(--superficie-suave); }
+.seleccion-casos .opcion-check { min-width: 48px; margin: 4px 0; font-size: 11px; font-variant-numeric: tabular-nums; }
+.acciones { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 22px 0 14px; }
+.acciones button, .control-presupuesto button, .referencia-panel button { min-height: 38px; border: 1px solid var(--borde); background: var(--superficie-suave); color: var(--texto); border-radius: 7px; padding: 9px 14px; font-size: 12px; font-weight: 550; }
+.acciones button:not(:disabled):hover, .control-presupuesto button:not(:disabled):hover, .referencia-panel button:not(:disabled):hover { background: var(--superficie-hover); border-color: var(--tenue); }
+.acciones button.activo { background: var(--azul-suave); color: var(--azul); border-color: var(--azul); }
+.acciones small { color: var(--secundario); font-size: 11px; line-height: 1.6; }
+.vista-previa { display: flex; flex-direction: column; gap: 7px; background: var(--azul-suave); border: 1px solid var(--borde); border-left: 3px solid var(--azul); border-radius: 8px; padding: 16px; color: var(--texto); font-size: 12px; line-height: 1.5; animation: aparecer 220ms ease-out both; }
+.vista-previa strong { font-weight: 600; }
+.vista-previa span, .vista-previa small { color: var(--secundario); font-size: 11px; line-height: 1.6; }
+.nota-campana { font-size: 12px; color: var(--secundario); line-height: 1.65; overflow-wrap: anywhere; }
+.tabla-contenedor { overflow-x: auto; border: 1px solid var(--borde); border-radius: 8px; margin-top: 16px; }
+.tabla-contenedor table { width: 100%; border-collapse: collapse; min-width: 900px; font-size: 11px; font-variant-numeric: tabular-nums; }
+.tabla-contenedor th, .tabla-contenedor td { padding: 14px; border-bottom: 1px solid var(--linea); text-align: left; vertical-align: middle; line-height: 1.6; }
+.tabla-contenedor th { background: var(--superficie-suave); color: var(--secundario); font-size: 10px; font-weight: 600; }
+.tabla-contenedor td { color: var(--texto); }
+.tabla-contenedor td strong { font-weight: 600; }
+.tabla-contenedor td small { color: var(--tenue); font-size: 10px; }
+.tabla-contenedor tbody tr:nth-child(even) { background: var(--superficie-suave); }
+.tabla-contenedor tbody tr:hover { background: var(--azul-suave); }
+.tabla-contenedor tbody tr:last-child td { border-bottom: 0; }
+.grafico-iteraciones { height: 10px; width: 150px; display: flex; background: var(--superficie-hover); border-radius: 3px; overflow: hidden; margin-bottom: 7px; }
+.segmento-iteracion, .segmento-fallo { height: 100%; }
+.segmento-fallo { background: var(--tenue); }
+.leyenda { font-size: 10px; color: var(--secundario); margin-top: 12px; line-height: 1.7; }
+.control-presupuesto { display: flex; align-items: end; gap: 9px; flex-wrap: wrap; margin: 16px 0; }
+.control-presupuesto label { width: 100%; margin: 0; }
+.control-presupuesto input { padding: 9px 11px; min-height: 38px; width: 140px; font-size: 12px; }
+.referencia-panel { border: 1px solid var(--borde); background: var(--superficie-suave); border-radius: 9px; padding: 20px; margin: 22px 0; }
+.referencia-panel h3 { font-size: 13px; font-weight: 600; margin: 0 0 5px; }
+.referencia-panel p, .referencia-panel small { color: var(--secundario); font-size: 11px; line-height: 1.65; }
+.referencia-panel p { margin: 0; }
+.referencia-panel .campos { margin: 18px 0; }
+.referencia-panel input { width: 100%; min-height: 42px; padding: 10px; font-size: 12px; }
+.referencia-panel input[type='file'] { font-size: 10px; padding: 6px; }
+.referencia-panel input[type='file']::file-selector-button { margin-right: 8px; border: 0; border-radius: 5px; padding: 7px; background: var(--superficie-hover); color: var(--texto); font: inherit; cursor: pointer; }
+.referencia-panel small { display: block; margin-top: 10px; overflow-wrap: anywhere; }
+.sin-denominador { color: var(--tenue); font-size: 11px; }
+@media (max-width: 900px) {
+  .resumen-dataset { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .matriz-opciones { grid-template-columns: 1fr; }
+  .casos-interior { grid-template-columns: 1fr; }
+  .referencia-panel .campos-tres { grid-template-columns: 1fr; }
+}
+@media (max-width: 520px) {
+  .investigacion { padding: 18px; border-radius: 12px; }
+  .resumen-dataset { grid-template-columns: 1fr; }
+  .campos-tres { grid-template-columns: 1fr; }
+  .panel-campana, .panel-resultados { padding: 15px; }
+  .referencia-panel { padding: 16px; }
+  .acciones button { flex-grow: 1; }
+  .resumen-dataset > div { padding: 13px; }
+}

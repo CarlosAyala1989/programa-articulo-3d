@@ -1,0 +1,9 @@
+.env
+*.env
+__pycache__/
+*.py[cod]
+.pytest_cache/
+interfaz/node_modules/
+interfaz/dist/
+.playwright-cli/
+output/playwright/
