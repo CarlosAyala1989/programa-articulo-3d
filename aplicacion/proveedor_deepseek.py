@@ -5,14 +5,19 @@ import time
 
 import httpx
 
-from aplicacion.configuracion import MODELOS_DISPONIBLES, URL_DEEPSEEK, perfil_generacion
+from aplicacion.configuracion import (
+    MODELOS_DISPONIBLES, TIEMPO_ESPERA_DEEPSEEK_SEGUNDOS, URL_DEEPSEEK, perfil_generacion,
+)
 
 
 class ErrorProveedor(Exception):
     """Fallo operativo externo que no consume otro intento científico."""
 
 
-def solicitar_codigo(modelo: str, mensajes: list[dict[str, str]], esfuerzo_razonamiento: str | None = None) -> dict:
+def solicitar_codigo(
+    modelo: str, mensajes: list[dict[str, str]], esfuerzo_razonamiento: str | None = None,
+    maximo_tokens: int | None = None,
+) -> dict:
     if modelo not in MODELOS_DISPONIBLES:
         raise ErrorProveedor("El modelo solicitado no está habilitado")
     clave = os.environ.get("DEEPSEEK_API_KEY", "").strip()
@@ -23,11 +28,11 @@ def solicitar_codigo(modelo: str, mensajes: list[dict[str, str]], esfuerzo_razon
         "model": modelo,
         "messages": mensajes,
         "stream": False,
-        **perfil_generacion(modelo, esfuerzo_razonamiento),
+        **perfil_generacion(modelo, esfuerzo_razonamiento, maximo_tokens),
     }
     encabezados = {"Authorization": f"Bearer {clave}"}
     # Los reintentos de transporte nunca se cuentan como otra generación CAD.
-    with httpx.Client(timeout=httpx.Timeout(1800.0, connect=12.0)) as cliente:
+    with httpx.Client(timeout=httpx.Timeout(TIEMPO_ESPERA_DEEPSEEK_SEGUNDOS, connect=12.0)) as cliente:
         for numero_transporte in range(2):
             try:
                 respuesta = cliente.post(

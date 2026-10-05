@@ -42,10 +42,13 @@ def verificar_modelo_local(codigo: str) -> dict:
     return {"etiqueta": etiqueta, "digest": digest, "cuantizacion": cuantizacion}
 
 
-def solicitar_codigo(modelo: str, mensajes: list[dict[str, str]], esfuerzo_razonamiento: str | None = None) -> dict:
-    perfil = perfil_generacion(modelo, esfuerzo_razonamiento)
+def solicitar_codigo(
+    modelo: str, mensajes: list[dict[str, str]], esfuerzo_razonamiento: str | None = None,
+    maximo_tokens: int | None = None,
+) -> dict:
+    perfil = perfil_generacion(modelo, esfuerzo_razonamiento, maximo_tokens)
     if modelo in MODELOS_DISPONIBLES:
-        respuesta = solicitar_deepseek(modelo, mensajes, esfuerzo_razonamiento)
+        respuesta = solicitar_deepseek(modelo, mensajes, esfuerzo_razonamiento, maximo_tokens)
         respuesta["proveedor"] = "deepseek"
         respuesta["perfil"] = {"modelo": modelo, **perfil}
         return respuesta

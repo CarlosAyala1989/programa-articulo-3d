@@ -31,12 +31,12 @@ MOTORES_DISPONIBLES = {
 MAXIMO_INTENTOS = 5
 VERSION_PLANTILLA = "v5-formas-organicas-avanzadas"
 MAXIMO_TOKENS_SALIDA = 8000
-MAXIMO_TOKENS_DEEPSEEK = 131072
+MAXIMO_TOKENS_DEEPSEEK = 393216
+TIEMPO_ESPERA_DEEPSEEK_SEGUNDOS = 10800
 TOKENS_ENTRADA_PLANIFICACION = 65536
 # El programa viaja como una variable base64 al contenedor. 90.000 bytes UTF-8
 # mantienen ese argumento por debajo del límite individual del proceso Linux.
 MAXIMO_BYTES_CODIGO = 90000
-MAXIMO_CARACTERES_RESPUESTA = 600000
 ESFUERZOS_DISPONIBLES = {"low": "Bajo", "high": "Alto", "max": "Máximo"}
 ESFUERZO_PREDETERMINADO = "max"
 
@@ -54,10 +54,20 @@ def resolver_esfuerzo(modelo: str, esfuerzo_razonamiento: str | None = None) -> 
     return esfuerzo
 
 
-def perfil_generacion(modelo: str, esfuerzo_razonamiento: str | None = None) -> dict:
+def perfil_generacion(
+    modelo: str, esfuerzo_razonamiento: str | None = None,
+    maximo_tokens: int | None = None,
+) -> dict:
     esfuerzo = resolver_esfuerzo(modelo, esfuerzo_razonamiento)
     if modelo in MODELOS_LOCALES:
+        if maximo_tokens is not None:
+            raise ValueError("El límite DeepSeek no corresponde a un modelo local")
         return {"temperatura": 0.2, "top_p": 0.9, "repeat_penalty": 1.05,
                 "num_predict": MAXIMO_TOKENS_SALIDA}
+    if maximo_tokens is not None and (
+        isinstance(maximo_tokens, bool) or not isinstance(maximo_tokens, int)
+        or not 1 <= maximo_tokens <= MAXIMO_TOKENS_DEEPSEEK
+    ):
+        raise ValueError("Límite de salida DeepSeek fuera del rango admitido")
     return {"thinking": {"type": "enabled"}, "reasoning_effort": esfuerzo,
-            "max_tokens": MAXIMO_TOKENS_DEEPSEEK}
+            "max_tokens": maximo_tokens if maximo_tokens is not None else MAXIMO_TOKENS_DEEPSEEK}

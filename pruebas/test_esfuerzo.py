@@ -13,9 +13,11 @@ from sqlalchemy.pool import StaticPool
 
 from aplicacion.api import aplicacion
 from aplicacion.base_datos import (
-    BaseDeclarativa, CasoDiseno, CondicionExperimental, Ejecucion,
+    BaseDeclarativa, Campana, CasoDiseno, CondicionExperimental, Ejecucion,
     IntentoGeneracion, VersionConjunto,
 )
+from aplicacion.configuracion import MAXIMO_TOKENS_DEEPSEEK, VERSION_PLANTILLA
+from aplicacion.costos import costo_maximo_planificacion
 from aplicacion.generacion import procesar_ejecucion
 from aplicacion.proveedores import solicitar_codigo
 
@@ -50,7 +52,57 @@ class EsfuerzoDeepSeek(unittest.TestCase):
                         self.assertEqual(capturados[-1]["model"], modelo)
                         self.assertEqual(capturados[-1]["reasoning_effort"], esfuerzo)
                         self.assertEqual(capturados[-1]["thinking"], {"type": "enabled"})
+                        self.assertEqual(capturados[-1]["max_tokens"], 393216)
                         self.assertEqual(respuesta["perfil"]["reasoning_effort"], esfuerzo)
+                        self.assertEqual(respuesta["perfil"]["max_tokens"], 393216)
+
+    def test_campana_anterior_mantiene_limite_congelado(self):
+        with self.sesiones() as sesion:
+            sesion.add(VersionConjunto(identificador="conjunto-anterior", nombre="Prueba", version="1",
+                finalidad="evaluacion", estado="congelado", huella_sha256="a" * 64))
+            sesion.add(Campana(identificador="campana-anterior", conjunto_identificador="conjunto-anterior",
+                nombre="Campaña con límite histórico", semilla=1,
+                presupuesto_usd=(costo_maximo_planificacion("deepseek-flash", 131072)
+                                 + costo_maximo_planificacion("deepseek-flash")) / 2,
+                configuracion={
+                    "plantilla": VERSION_PLANTILLA,
+                    "perfiles_generacion": {"deepseek-flash": {"max_tokens": 131072}},
+                }))
+            sesion.add(Ejecucion(identificador="ejecucion-anterior", descripcion="Pieza curva",
+                motor="cadquery", modelo="deepseek-flash", modo="open-loop",
+                campana_identificador="campana-anterior"))
+            sesion.commit()
+        respuesta = {"texto": "!", "modelo_informado": "deepseek-flash",
+                    "tokens_entrada": 1, "tokens_salida": 1, "finalizacion": "stop",
+                    "perfil": {"max_tokens": 131072}}
+        with patch("aplicacion.generacion.crear_sesion", self.sesiones), patch(
+            "aplicacion.generacion.solicitar_codigo", return_value=respuesta
+        ) as proveedor:
+            procesar_ejecucion("ejecucion-anterior")
+        self.assertEqual(proveedor.call_args.args[3], 131072)
+        with self.sesiones() as sesion:
+            intento = sesion.get(Ejecucion, "ejecucion-anterior").intentos[0]
+            self.assertEqual(intento.solicitud_modelo["perfil"]["max_tokens"], 131072)
+        self.assertEqual(MAXIMO_TOKENS_DEEPSEEK, 393216)
+        self.assertLess(costo_maximo_planificacion("deepseek-flash", 131072),
+                        costo_maximo_planificacion("deepseek-flash"))
+
+    def test_respuesta_extensa_se_guarda_completa(self):
+        with self.sesiones() as sesion:
+            sesion.add(Ejecucion(identificador="respuesta-extensa", descripcion="Pieza curva",
+                motor="cadquery", modelo="deepseek-flash", modo="open-loop"))
+            sesion.commit()
+        texto_extenso = "!" * 600001
+        respuesta = {"texto": texto_extenso, "modelo_informado": "deepseek-flash",
+                    "tokens_entrada": 1, "tokens_salida": 1, "finalizacion": "stop",
+                    "perfil": {"max_tokens": 393216}}
+        with patch("aplicacion.generacion.crear_sesion", self.sesiones), patch(
+            "aplicacion.generacion.solicitar_codigo", return_value=respuesta
+        ):
+            procesar_ejecucion("respuesta-extensa")
+        with self.sesiones() as sesion:
+            intento = sesion.get(Ejecucion, "respuesta-extensa").intentos[0]
+            self.assertEqual(intento.respuesta_modelo, texto_extenso)
 
     def test_api_persiste_seleccion_y_conserva_compatibilidad(self):
         with patch("aplicacion.api.crear_sesion", self.sesiones), patch("aplicacion.api.tarea_generacion.delay") as cola:

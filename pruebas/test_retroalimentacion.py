@@ -8,7 +8,6 @@ from unittest.mock import patch
 
 import httpx
 
-from aplicacion.configuracion import MAXIMO_TOKENS_DEEPSEEK
 from aplicacion.generacion import instrucciones_sistema, revisar_codigo
 from aplicacion.proveedor_deepseek import ErrorProveedor, solicitar_codigo
 from aplicacion.retroalimentacion import construir_solicitud, huella_codigo
@@ -95,7 +94,7 @@ class RetroalimentacionCompleta(unittest.TestCase):
                  transport=httpx.MockTransport(responder), **opciones)):
             solicitar_codigo("deepseek-v4-pro", mensajes)
         self.assertEqual(capturados[0]["messages"], mensajes)
-        self.assertEqual(capturados[0]["max_tokens"], MAXIMO_TOKENS_DEEPSEEK)
+        self.assertEqual(capturados[0]["max_tokens"], 393216)
         self.assertEqual(capturados[0]["thinking"], {"type": "enabled"})
         self.assertEqual(capturados[0]["reasoning_effort"], "max")
         self.assertNotIn("temperature", capturados[0])

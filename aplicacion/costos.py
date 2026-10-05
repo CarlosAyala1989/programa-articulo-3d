@@ -21,6 +21,9 @@ def costo_estimado(modelo: str, tokens_entrada: int, tokens_salida: int) -> floa
     return (max(0, tokens_entrada) * entrada + max(0, tokens_salida) * salida) / 1_000_000
 
 
-def costo_maximo_planificacion(modelo: str) -> float | None:
+def costo_maximo_planificacion(modelo: str, maximo_tokens: int | None = None) -> float | None:
     """Estimación conservadora: incluye programa completo e historial de correcciones."""
-    return costo_estimado(modelo, TOKENS_ENTRADA_PLANIFICACION, MAXIMO_TOKENS_DEEPSEEK)
+    return costo_estimado(
+        modelo, TOKENS_ENTRADA_PLANIFICACION,
+        maximo_tokens if maximo_tokens is not None else MAXIMO_TOKENS_DEEPSEEK,
+    )

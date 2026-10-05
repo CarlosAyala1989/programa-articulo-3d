@@ -15,7 +15,7 @@ from aplicacion.base_datos import (
     crear_sesion, fecha_actual,
 )
 from aplicacion.configuracion import (
-    DIRECTORIO_ARTEFACTOS, MAXIMO_BYTES_CODIGO, MAXIMO_CARACTERES_RESPUESTA, MODELOS_LOCALES,
+    DIRECTORIO_ARTEFACTOS, MAXIMO_BYTES_CODIGO, MODELOS_LOCALES,
     URL_SUPERVISOR, VERSION_PLANTILLA, perfil_generacion, resolver_esfuerzo,
 )
 from aplicacion.costos import PERFIL_TARIFA, costo_estimado, costo_maximo_planificacion
@@ -106,6 +106,21 @@ def guardar_archivos(
         )
 
 
+def _maximo_tokens_ejecucion(sesion, ejecucion: Ejecucion) -> int | None:
+    """Recupera el límite fijado al crear la campaña o al iniciar sus intentos."""
+    if ejecucion.campana_identificador:
+        campana = sesion.get(Campana, ejecucion.campana_identificador)
+        perfiles = (campana.configuracion or {}).get("perfiles_generacion", {})
+        limite = (perfiles.get(ejecucion.modelo) or {}).get("max_tokens")
+        if limite is not None:
+            return limite
+    for intento in ejecucion.intentos:
+        limite = ((intento.solicitud_modelo or {}).get("perfil") or {}).get("max_tokens")
+        if limite is not None:
+            return limite
+    return None
+
+
 def _bloqueo_campana(sesion, ejecucion: Ejecucion) -> str | None:
     if ejecucion.estado == "cancelada":
         return "cancelada"
@@ -141,7 +156,9 @@ def _bloqueo_campana(sesion, ejecucion: Ejecucion) -> str | None:
                 ejecucion.estado = "bloqueada"
                 ejecucion.mensaje = "La imagen CAD cambió durante la campaña"
                 return "runtime"
-    costo_previsto = costo_maximo_planificacion(ejecucion.modelo) or 0
+    costo_previsto = costo_maximo_planificacion(
+        ejecucion.modelo, _maximo_tokens_ejecucion(sesion, ejecucion)
+    ) or 0
     if campana.presupuesto_usd is not None and campana.gasto_estimado_usd + costo_previsto > campana.presupuesto_usd:
         campana.estado = "pausada"
         campana.mensaje = "Pausada por límite de presupuesto estimado"
@@ -176,6 +193,7 @@ def procesar_ejecucion(identificador: str) -> None:
                                   for intento in intentos_previos
                                   if (intento.solicitud_modelo or {}).get("perfil")), None)
         esfuerzo = resolver_esfuerzo(modelo, ejecucion.esfuerzo_razonamiento or esfuerzo_anterior)
+        maximo_tokens = _maximo_tokens_ejecucion(sesion, ejecucion)
         ejecucion.esfuerzo_razonamiento = esfuerzo
         maximo = 1 if ejecucion.modo == "open-loop" else min(ejecucion.maximo_intentos, 5)
         siguiente_intento = len(intentos_previos) + 1
@@ -208,7 +226,8 @@ def procesar_ejecucion(identificador: str) -> None:
         ]
         solicitud_registrada = {
             "mensajes": mensajes, "plantilla": VERSION_PLANTILLA,
-            "retroalimentacion": retroalimentacion, "perfil": perfil_generacion(modelo, esfuerzo),
+            "retroalimentacion": retroalimentacion,
+            "perfil": perfil_generacion(modelo, esfuerzo, maximo_tokens),
         }
         with crear_sesion() as sesion:
             sesion.get(IntentoGeneracion, identificador_intento).solicitud_modelo = solicitud_registrada
@@ -241,7 +260,7 @@ def procesar_ejecucion(identificador: str) -> None:
         inicio_total = time.monotonic()
         inicio_ia = time.monotonic()
         try:
-            respuesta = solicitar_codigo(modelo, mensajes, esfuerzo)
+            respuesta = solicitar_codigo(modelo, mensajes, esfuerzo, maximo_tokens)
         except ErrorProveedor as error:
             with crear_sesion() as sesion:
                 intento = sesion.get(IntentoGeneracion, identificador_intento)
@@ -263,7 +282,7 @@ def procesar_ejecucion(identificador: str) -> None:
         # Persistir la respuesta antes de ejecutar CAD evita repetir una llamada ya recibida.
         with crear_sesion() as sesion:
             intento = sesion.get(IntentoGeneracion, identificador_intento)
-            intento.respuesta_modelo = respuesta["texto"][:MAXIMO_CARACTERES_RESPUESTA]
+            intento.respuesta_modelo = respuesta["texto"]
             intento.codigo = codigo
             intento.modelo_informado = respuesta["modelo_informado"]
             intento.tokens_entrada = respuesta["tokens_entrada"]
@@ -342,7 +361,7 @@ def procesar_ejecucion(identificador: str) -> None:
                 ejecucion = sesion.get(Ejecucion, identificador)
                 intento.estado = "error_supervisor"
                 intento.fase_error = "infraestructura"
-                intento.respuesta_modelo = respuesta["texto"][:MAXIMO_CARACTERES_RESPUESTA]
+                intento.respuesta_modelo = respuesta["texto"]
                 intento.codigo = codigo
                 intento.solicitud_modelo = {**solicitud_registrada, "perfil": respuesta.get("perfil")}
                 intento.diagnostico = str(error)
@@ -361,7 +380,7 @@ def procesar_ejecucion(identificador: str) -> None:
         with crear_sesion() as sesion:
             intento = sesion.get(IntentoGeneracion, identificador_intento)
             ejecucion = sesion.get(Ejecucion, identificador)
-            intento.respuesta_modelo = respuesta["texto"][:MAXIMO_CARACTERES_RESPUESTA]
+            intento.respuesta_modelo = respuesta["texto"]
             intento.codigo = codigo
             intento.modelo_informado = respuesta["modelo_informado"]
             intento.tokens_entrada = respuesta["tokens_entrada"]
