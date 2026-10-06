@@ -27,6 +27,7 @@ from aplicacion.configuracion import (
     ESFUERZOS_DISPONIBLES, ESFUERZO_PREDETERMINADO, resolver_esfuerzo,
     MAXIMO_ITERACIONES_QUALITY_LOOP, MAXIMO_LLAMADAS_QUALITY_LOOP,
     MAXIMO_TOKENS_QUALITY_LOOP, MAXIMO_TOKENS_SALIDA_QUALITY_GENERADOR,
+    NVIDIA_MODEL_GENERATOR,
 )
 from aplicacion.conjuntos import (
     cargar_conjunto_principal, importar_csv, importar_documento, resumen_conjunto,
@@ -109,7 +110,7 @@ def consultar_opciones() -> dict:
             "maximo_tokens_estimados": MAXIMO_TOKENS_QUALITY_LOOP,
             "maximo_tokens_salida_generador": MAXIMO_TOKENS_SALIDA_QUALITY_GENERADOR,
             "candidatos_best_of_n": 3,
-            "modelo_nvidia_generador": "deepseek-ai/deepseek-v4.1-flash",
+            "modelo_nvidia_generador": NVIDIA_MODEL_GENERATOR,
             "roles": catalogo_roles(),
             "referencia_habilitada": os.environ.get("QUALITY_ALLOW_REFERENCE_METRICS", "0") == "1"},
     }

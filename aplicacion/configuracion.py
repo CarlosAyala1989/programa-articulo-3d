@@ -21,10 +21,15 @@ MODELOS_DISPONIBLES = {
 MODELOS_NVIDIA_CATALOGO = {
     "nvidia/nemotron-3-ultra-550b-a55b": "Nemotron 3 Ultra 550B · Planner",
     "nvidia/nemotron-3-super-120b-a12b": "Nemotron 3 Super 120B · Planner/Judge",
-    "poolside/laguna-xs-2.1": "Laguna XS 2.1 · Revisor de código",
+    "poolside/laguna-xs-2.1": "Laguna XS 2.1 · Revisor de código experimental",
     "moonshotai/kimi-k3": "Kimi K3 · Revisor visual",
-    "deepseek-ai/deepseek-v4.1-flash": "DeepSeek V4.1 Flash · Generador NVIDIA NIM",
+    "deepseek-ai/deepseek-v4.1-flash": "DeepSeek V4.1 Flash · Endpoint NVIDIA experimental",
     "z-ai/glm-5.3": "GLM 5.3 · Juez textual",
+}
+MODELOS_NVIDIA_GENERADORES = {
+    "nvidia/nemotron-3-super-120b-a12b": "NVIDIA NIM · Nemotron 3 Super (código)",
+    "nvidia/nemotron-3-ultra-550b-a55b": "NVIDIA NIM · Nemotron 3 Ultra (código complejo)",
+    "moonshotai/kimi-k3": "NVIDIA NIM · Kimi K3 (código alternativo)",
 }
 MODELO_COSMOS_EXPERIMENTAL = os.environ.get("NVIDIA_MODEL_VISUAL_REASONER", "").strip()
 QUALITY_ALLOW_REFERENCE_METRICS = os.environ.get("QUALITY_ALLOW_REFERENCE_METRICS", "0") == "1"
@@ -49,9 +54,9 @@ NVIDIA_MODEL_PLANNER = os.environ.get(
 NVIDIA_MODEL_PLANNER_FALLBACK = os.environ.get(
     "NVIDIA_MODEL_PLANNER_FALLBACK", "nvidia/nemotron-3-super-120b-a12b"
 )
-NVIDIA_MODEL_CODE_REVIEWER = os.environ.get("NVIDIA_MODEL_CODE_REVIEWER", "poolside/laguna-xs-2.1")
+NVIDIA_MODEL_CODE_REVIEWER = os.environ.get("NVIDIA_MODEL_CODE_REVIEWER", "nvidia/nemotron-3-super-120b-a12b")
 NVIDIA_MODEL_VISUAL_REVIEWER = os.environ.get("NVIDIA_MODEL_VISUAL_REVIEWER", "moonshotai/kimi-k3")
-NVIDIA_MODEL_GENERATOR = os.environ.get("NVIDIA_MODEL_GENERATOR", "deepseek-ai/deepseek-v4.1-flash")
+NVIDIA_MODEL_GENERATOR = os.environ.get("NVIDIA_MODEL_GENERATOR", "nvidia/nemotron-3-super-120b-a12b")
 NVIDIA_MODEL_TEXT_JUDGE = os.environ.get("NVIDIA_MODEL_TEXT_JUDGE", "nvidia/nemotron-3-super-120b-a12b")
 _MODELOS_NVIDIA_CONFIGURADOS = {
     NVIDIA_MODEL_PLANNER, NVIDIA_MODEL_PLANNER_FALLBACK, NVIDIA_MODEL_CODE_REVIEWER,

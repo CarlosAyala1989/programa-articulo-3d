@@ -231,7 +231,7 @@ def catalogo_roles() -> dict:
         "revisor_codigo": {"modelo": NVIDIA_MODEL_CODE_REVIEWER},
         "revisor_visual": {"modelo": NVIDIA_MODEL_VISUAL_REVIEWER},
         "juez_textual": {"modelo": NVIDIA_MODEL_TEXT_JUDGE},
-        "generador": {"modelo": os.environ.get("NVIDIA_MODEL_GENERATOR", "deepseek-ai/deepseek-v4.1-flash")},
+        "generador": {"modelo": os.environ.get("NVIDIA_MODEL_GENERATOR", "nvidia/nemotron-3-super-120b-a12b")},
         "experimental_cosmos": {
             "modelo": MODELO_COSMOS_EXPERIMENTAL or "nvidia/cosmos3-nano-reasoner",
             "disponible_en_catalogo": MODELO_COSMOS_EXPERIMENTAL in MODELOS_NVIDIA_CATALOGO,

@@ -23,6 +23,9 @@ from aplicacion.calidad.modelos import (
 from aplicacion.calidad.nvidia import ErrorNvidia, ProveedorNvidia, RouterModelos
 from aplicacion.calidad.prompts import instruccion_modeler, validar_plan_para_descripcion
 from aplicacion.calidad.recipes import seleccionar_recipes, texto_recipes
+from aplicacion.configuracion import (
+    MODELOS_NVIDIA_GENERADORES, NVIDIA_MODEL_CODE_REVIEWER, NVIDIA_MODEL_GENERATOR,
+)
 from aplicacion.generacion import revisar_codigo
 
 
@@ -138,17 +141,18 @@ class GeometricPlanTests(unittest.TestCase):
 
 
 class RouterModelTests(unittest.TestCase):
-    def test_laguna_recibe_version_exacta_del_motor(self):
+    def test_revisor_recibe_version_exacta_del_motor(self):
         capturado = {}
 
         class ProveedorFalso:
             def generar_estructurado(self, modelo, sistema, solicitud, esquema, **kwargs):
-                capturado["solicitud"] = solicitud
+                capturado.update({"modelo": modelo, "solicitud": solicitud})
                 return RevisionCodigo(accepted=True, severity="none"), respuesta()
 
         RouterModelos(ProveedorFalso()).revisar_codigo(
             "build123d", plan_mecanico(), "from build123d import Box\nresultado = Box(1, 1, 1)"
         )
+        self.assertEqual(capturado["modelo"], NVIDIA_MODEL_CODE_REVIEWER)
         self.assertIn("build123d 0.13.0", capturado["solicitud"])
 
     def test_planificador_usa_fallback_solo_tras_rechazo_http_explicito(self):
@@ -204,6 +208,16 @@ class RouterModelTests(unittest.TestCase):
 
 
 class NvidiaProviderTests(unittest.TestCase):
+    def test_generadores_nvidia_responsivos_figuran_en_opciones(self):
+        with patch.dict(os.environ, {"NVIDIA_API_KEY": "clave-prueba-no-real"}):
+            opciones = consultar_opciones()
+        self.assertEqual(opciones["quality_loop"]["modelo_nvidia_generador"], NVIDIA_MODEL_GENERATOR)
+        self.assertIn("nvidia/nemotron-3-super-120b-a12b", opciones["modelos"])
+        for modelo in MODELOS_NVIDIA_GENERADORES:
+            self.assertIn(modelo, opciones["modelos"])
+        if NVIDIA_MODEL_GENERATOR != "deepseek-ai/deepseek-v4.1-flash":
+            self.assertNotIn("deepseek-ai/deepseek-v4.1-flash", opciones["modelos"])
+
     def test_fallos_de_infraestructura_tienen_categoria_distinta(self):
         self.assertEqual(flujo._clasificar_fallo_proveedor(
             ErrorNvidia("Timeout NVIDIA", "timeout")), "timeout")

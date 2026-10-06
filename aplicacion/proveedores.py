@@ -5,7 +5,8 @@ import os
 import httpx
 
 from aplicacion.configuracion import (
-    MAXIMO_TOKENS_SALIDA, MODELOS_DISPONIBLES, MODELOS_LOCALES, MODELOS_NVIDIA_REGISTRADOS,
+    MAXIMO_TOKENS_SALIDA, MODELOS_DISPONIBLES, MODELOS_LOCALES, MODELOS_NVIDIA_GENERADORES,
+    MODELOS_NVIDIA_REGISTRADOS,
     NVIDIA_MODEL_GENERATOR, URL_OLLAMA, perfil_generacion,
 )
 from aplicacion.proveedor_deepseek import ErrorProveedor, solicitar_codigo as solicitar_deepseek
@@ -14,8 +15,10 @@ from aplicacion.calidad.nvidia import ErrorNvidia, ProveedorNvidia
 
 def modelos_configurados() -> dict:
     resultado = dict(MODELOS_DISPONIBLES)
-    if os.environ.get("NVIDIA_API_KEY", "").strip() and NVIDIA_MODEL_GENERATOR in MODELOS_NVIDIA_REGISTRADOS:
-        resultado[NVIDIA_MODEL_GENERATOR] = "NVIDIA NIM · " + NVIDIA_MODEL_GENERATOR
+    if os.environ.get("NVIDIA_API_KEY", "").strip():
+        resultado.update(MODELOS_NVIDIA_GENERADORES)
+        if NVIDIA_MODEL_GENERATOR in MODELOS_NVIDIA_REGISTRADOS:
+            resultado.setdefault(NVIDIA_MODEL_GENERATOR, "NVIDIA NIM · " + NVIDIA_MODEL_GENERATOR)
     for codigo, perfil in MODELOS_LOCALES.items():
         if os.environ.get(perfil["variable"], "").strip():
             resultado[codigo] = f'{perfil["nombre"]} — {perfil["cuantizacion"]} (Ollama)'

@@ -320,7 +320,7 @@ function Aplicacion() {
           <button className="boton" disabled={enviando || !modelo || descripcion.trim().length < 12}>{enviando ? 'Iniciando…' : 'Generar pieza 3D'} <span>↗</span></button>
         </form>
       </section>
-      <aside className="guia-generacion"><h2>Tu pieza, paso a paso</h2><ol><li>Describe las dimensiones, curvas y detalles que necesitas.</li><li>Elige Flash o Pro y su nivel de esfuerzo.</li><li>Selecciona el motor CAD y la estrategia de generación.</li></ol><p>El resultado se abrirá en su propia página con el visor 360°, los archivos y el diagnóstico de cada intento.</p><a href="#/casos">Explorar los 60 casos de evaluación →</a>{identificador && <a href={`#/resultado/${identificador}`}>Ver la última ejecución →</a>}</aside>
+      <aside className="guia-generacion"><h2>Tu pieza, paso a paso</h2><ol><li>Describe las dimensiones, curvas y detalles que necesitas.</li><li>Elige un modelo de IA. El nivel de esfuerzo solo se aplica a DeepSeek Flash y Pro.</li><li>Selecciona el motor CAD y la estrategia de generación.</li></ol><p>El resultado se abrirá en su propia página con el visor 360°, los archivos y el diagnóstico de cada intento.</p><a href="#/casos">Explorar los 60 casos de evaluación →</a>{identificador && <a href={`#/resultado/${identificador}`}>Ver la última ejecución →</a>}</aside>
     </div>}
 
     {ruta.pagina === 'resultado' && <div className="pagina-resultado">
