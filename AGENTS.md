@@ -2,11 +2,11 @@
 
 ## Project Structure & Module Organization
 
-- `aplicacion/`: FastAPI endpoints, SQLAlchemy models, Celery jobs, AI providers, prompts, campaigns, and metrics.
+- `aplicacion/`: FastAPI, SQLAlchemy, Celery, providers, campaigns, metrics; `calidad/` adds geometric planning, NVIDIA routing, reviews, and Quality Gate.
 - `interfaz/src/`: React pages, Three.js viewer, and CSS themes; Vite builds into `interfaz/dist/`.
 - `supervisor/` and `motores/`: isolated CAD execution and Docker images for CadQuery, build123d, and FreeCAD.
-- `evaluador/`: independent geometry, topology, IoU, and Chamfer evaluation.
-- `datos/`: versioned prompts; `pruebas/`: tests and STEP fixtures. Consult `README_APLICACION.md` for operations and `PLAN_TECNICO_AGENTE_CIEL.md` for scope.
+- `evaluador/`: geometry, topology, IoU, Chamfer, and deterministic multiview rendering.
+- `datos/`: versioned prompts; `pruebas/`: tests and STEP fixtures. See `README_APLICACION.md` for operations and `PLAN_TECNICO_AGENTE_CIEL.md` for scope.
 
 ## Build, Test, and Development Commands
 
@@ -28,23 +28,23 @@ Rebuild the application image and recreate `api` and `trabajador` after applicat
 
 ## Coding Style & Naming Conventions
 
-Use Spanish identifiers, comments, UI text, tables, and columns; retain required external API names. Python uses four-space indentation, type hints, `snake_case` functions, and `PascalCase` classes. JSX uses two spaces, single quotes, semicolons, `camelCase` functions, and `PascalCase` components. Match surrounding code; no formatter or linter is configured.
+Use Spanish identifiers, comments, UI text, tables, and columns; retain external API names. Python: four spaces, type hints, `snake_case` functions, `PascalCase` classes. JSX: two spaces, single quotes, semicolons, `camelCase` functions, `PascalCase` components. Match nearby code; no formatter or linter is configured.
 
 ## Testing Guidelines
 
-Use `unittest` with `pruebas/test_*.py` files and `test_*` methods. Run the application suite and geometry suite in their respective images:
+Use `unittest`, `pruebas/test_*.py`, and `test_*` methods. Run the suites in their respective images:
 
 ```bash
 docker run --rm --network agente-ciel_default -v "$PWD:/servicio:ro" ciel-aplicacion:piloto python -m unittest discover -s pruebas -v
 docker run --rm -v "$PWD:/servicio:ro" ciel-evaluador:piloto python -m unittest discover -s pruebas -p test_evaluador.py -v
 ```
 
-Geometry tests skip without CAD dependencies. Mock paid providers; use in-memory SQLite for database tests. No coverage threshold is configured. Add regression tests for changed behavior and check UI changes in both themes and mobile layouts.
+Geometry tests skip without CAD dependencies. Mock paid providers; use in-memory SQLite. Add regression tests and check UI changes in both themes and mobile layouts.
 
 ## Commit & Pull Request Guidelines
 
-Recent commits use concise Spanish subjects such as `Documentar plan y prototipos del estudio CAD` and `Implementar aplicación CAD y evaluación digital`; no prefix convention is established. PRs should explain the problem, behavior changes, validation, related issues, and screenshots for UI changes. Stage only relevant files.
+Use concise Spanish commit subjects (for example, `Implementar aplicación CAD y evaluación digital`); no prefix is established. PRs should describe behavior, validation, related issues, and include UI screenshots. Stage only relevant files.
 
 ## Configuration & Research Constraints
 
-Keep `DEEPSEEK_API_KEY` in an external environment file with permissions `600`; never commit or print secrets. Preserve the frozen 60-case dataset through versioning, the five-attempt closed-loop limit, and separate execution/CAD success metrics. Never send independent STEP references to AI providers.
+Keep `DEEPSEEK_API_KEY` and `NVIDIA_API_KEY` in an external file with mode `600`; never commit, log, print, or expose them to the frontend. Mock paid providers. Preserve the frozen 60 cases, five-attempt legacy loop, and separate technical/quality success. Never send STEP references to Planner, Modeler, or Repairer; reference metrics require the explicit flag. Version new protocols; do not rewrite historical campaigns.

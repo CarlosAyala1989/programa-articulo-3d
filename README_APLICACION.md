@@ -1,6 +1,6 @@
 # Agente Ciel · generación CAD y evaluación digital
 
-Aplicación local para convertir descripciones en español en modelos CAD con **CadQuery, build123d y FreeCAD Python API**. Permite generación individual y campañas con **open-loop** (un intento) y **closed-loop** (hasta cinco intentos con diagnóstico y reparación). Incluye el conjunto versionado **CAD-LLMIA-60**: 20 casos básicos, 20 intermedios y 20 complejos. La aplicación calcula únicamente resultados digitales; no gestiona impresión, fotografías, escáneres ni metrología física.
+Aplicación local para convertir descripciones en español en modelos CAD con **CadQuery, build123d y FreeCAD Python API**. Permite generación individual y campañas con **open-loop** (un intento), **closed-loop** (hasta cinco intentos con diagnóstico y reparación) y un **Quality Loop experimental** que planifica, genera, valida, mide y repara hasta tres ciclos. Incluye el conjunto versionado **CAD-LLMIA-60**: 20 casos básicos, 20 intermedios y 20 complejos. La aplicación calcula únicamente resultados digitales; no gestiona impresión, fotografías, escáneres ni metrología física.
 
 Cada ejecución conserva la solicitud efectiva, respuesta, script, tokens, latencia, fase de fallo, primer éxito de ejecución, primer CAD válido, primer CAD exportable y archivos con SHA-256. Una respuesta de IA se persiste antes de pasar al runtime CAD. Un proceso abortado con desenlace incierto se muestra como incidencia; nunca se reenvía automáticamente una petición cuya facturación o respuesta podría haberse perdido.
 
@@ -21,7 +21,7 @@ Cada ejecución conserva la solicitud efectiva, respuesta, script, tokens, laten
 
 4. Abrir <http://localhost:8000>. El puerto está vinculado a `127.0.0.1`; si se publica en la red universitaria, se requiere autenticación y control de acceso antes de exponerlo.
 
-PostgreSQL y el volumen `artefactos` conservan campañas, intentos y archivos al reiniciar. Redis mantiene la cola. El trabajador recibe la clave DeepSeek; el navegador, evaluador y runtimes CAD no la reciben. El supervisor crea contenedores efímeros sin red, con sistema de archivos de solo lectura y límites de CPU, memoria, procesos y duración. Por tener acceso al socket de Docker, debe ejecutarse solo en un host controlado.
+PostgreSQL y el volumen `artefactos` conservan campañas, intentos y archivos al reiniciar. Redis mantiene la cola. Las claves DeepSeek y NVIDIA se leen de variables de entorno; NVIDIA solo se inyecta en API y trabajador, y ninguna clave se guarda en PostgreSQL, artefactos, logs, imágenes o navegador. El evaluador y los runtimes CAD no reciben credenciales. El supervisor crea contenedores efímeros sin red, con sistema de archivos de solo lectura y límites de CPU, memoria, procesos y duración. Por tener acceso al socket de Docker, debe ejecutarse solo en un host controlado.
 
 ## Modelos y motores
 
@@ -37,7 +37,7 @@ Los modelos pagados habilitados son `deepseek-flash` y `deepseek-v4-pro`, cada u
 
 Para activar un perfil local, configurar su etiqueta exacta en el mismo archivo de entorno y `URL_OLLAMA` si Ollama corre en otra máquina. El adaptador consulta `/api/tags` antes de cada generación y exige que la etiqueta exista y reporte la cuantización requerida; guarda digest y modelo informado. No sustituye un perfil por otro ni invoca DeepSeek cuando falla Ollama. El servidor Ollama debe ser alcanzable desde los contenedores por una red privada. **No se han instalado ni probado aún los cinco modelos locales en la máquina universitaria**; su disponibilidad depende de esos pesos y de la configuración de Ollama.
 
-La tarifa de DeepSeek usada para **estimar**, no facturar, es la tarifa pico sin descuento de caché consultada el 2026-10-04. La vista previa de las campañas nuevas supone conservadoramente 65.536 tokens de entrada y hasta 393.216 de salida por generación pagada, incluido el razonamiento, para contemplar el programa completo y el historial de fallos. El consumo real puede ser mucho menor. El límite de salida queda congelado al crear cada campaña; las campañas anteriores conservan sus 131.072 tokens. La campaña permite un tope estimado y se pausa antes de una nueva llamada si no dispone de margen, usando su límite congelado; una solicitud que termina en timeout remoto podría tener un cargo desconocido. Los archivos del entorno nunca se copian a imágenes ni se incluyen en exportaciones.
+La tarifa de DeepSeek usada para **estimar**, no facturar, es la tarifa pico sin descuento de caché consultada el 2026-10-04. La vista previa de las campañas nuevas supone conservadoramente 65.536 tokens de entrada y hasta 393.216 de salida por generación pagada, incluido el razonamiento, para contemplar el programa completo y el historial de fallos. El consumo real puede ser mucho menor. El límite de salida queda congelado al crear cada campaña; las campañas anteriores conservan sus 131.072 tokens. La campaña permite un tope estimado y se pausa antes de una nueva llamada si no dispone de margen, usando su límite congelado; una solicitud que termina en timeout remoto podría tener un cargo desconocido. El modelo NVIDIA aparece como generador seleccionable solo con `NVIDIA_API_KEY` presente. Los archivos del entorno nunca se copian a imágenes ni se incluyen en exportaciones.
 
 ## Detalle y feedback de corrección
 
@@ -51,7 +51,39 @@ El system prompt se mantiene en `aplicacion/prompts_sistema.py`, con instruccion
 
 Los tres runtimes exportan un STL nativo con desviación lineal **absoluta de 0,02 mm** y angular **0,05 rad**. El STEP conserva la geometría B-Rep; el STL común del evaluador mantiene su perfil de comparación previamente definido. El visor suaviza normales de curvas y preserva discontinuidades angulares de 30° o más; esto afecta únicamente la iluminación, no las coordenadas ni los archivos. El encuadre inicial adapta la cámara al volumen y al tamaño del visor para mostrar la pieza con mayor claridad.
 
-**La validez CAD y la resolución STL no certifican parecido visual o fidelidad arqueológica.** La parada sigue ocurriendo al obtener el primer CAD válido y exportable. Una réplica exacta necesita una referencia y una evaluación de semejanza apropiada; los rasgos ausentes no se recuperan solo aumentando la cantidad de triángulos. Para no mezclar protocolos, las campañas de las plantillas anteriores conservan sus resultados históricos y deben recrearse como campañas nuevas antes de usar la plantilla v5.
+**La validez CAD y la resolución STL no certifican parecido visual o fidelidad arqueológica.** La parada sigue ocurriendo al obtener el primer CAD válido y exportable en open-loop/closed-loop. Una réplica exacta necesita una referencia y una evaluación de semejanza apropiada; los rasgos ausentes no se recuperan solo aumentando la cantidad de triángulos. Quality Loop tiene su propio protocolo versionado (`ciel-quality-loop-v1`); las campañas nuevas usan `v6-quality-loop-geometric-plan`. Las campañas de plantilla v5 o anterior conservan sus resultados históricos, pero deben recrearse para ejecutar nuevas condiciones con la versión actual.
+
+## Quality Loop experimental
+
+Quality Loop es un modo individual, separado de las campañas históricas. Usa Nemotron Ultra como planificador y Nemotron Super únicamente ante rechazos HTTP explícitos compatibles con fallback; el plan Pydantic versionado se guarda antes de modelar y las cotas marcadas `specified` se contrastan con la descripción original. El generador se puede elegir entre DeepSeek directo, Ollama y DeepSeek V4.1 Flash servido por NVIDIA NIM. CadQuery, build123d y FreeCAD mantienen sus propios contratos de exportación.
+
+`GeometricPlan` (`ciel-geometric-plan-v1`) especifica unidades mm, clase `MECHANICAL_PRECISE`/`ORGANIC_FREEFORM`/`HYBRID`, coordenadas y orientación, cotas globales, caja/centroide/volumen cuando se declaran, features con `feature_id`, dependencias y regiones, simetrías, restricciones, operaciones, perfiles, trayectorias, espesores, agujeros, cavidades, relieves, cortes, tolerancias, procedencia `specified`/`inferred` y criterios verificables. Planner interpreta; Modeler genera Python para el motor seleccionado; Repairer recibe el plan, código completo anterior, revisiones, métricas y features a preservar. La biblioteca `recipes.py` entrega determinísticamente solo las orientaciones pertinentes al plan; no contiene piezas de respaldo.
+
+Cada candidato pasa por política AST, Laguna como revisor obligatorio de código, runtime CAD aislado y el evaluador determinista. Solo un candidato con éxito técnico recibe la lámina ortográfica reproducible de ocho vistas, Kimi K3 como revisor visual y GLM 5.3 como critic geométrico. El critic propone prioridades y rasgos que se deben preservar; no modifica código. El Repairer recibe el código completo del candidato ganador anterior, diagnósticos, plan, métricas y lista `preservar`. El modo termina al aceptar Quality Gate o tras tres ciclos. **Best-of-N** es opcional y genera hasta tres candidatos con el mismo plan, descripción, modelo y motor por ciclo; registra y clasifica cada candidato por separado.
+
+El límite predeterminado es 40 llamadas de modelo y 800.000 tokens presupuestados por ejecución; DeepSeek directo usa hasta 32.768 tokens de salida por generación en este modo. Se puede ajustar con `MAXIMO_LLAMADAS_QUALITY_LOOP`, `MAXIMO_TOKENS_QUALITY_LOOP` y `MAXIMO_TOKENS_SALIDA_QUALITY_GENERADOR`. Los tokens de NIM que la API no informe se presupuestan con una estimación conservadora basada en tamaño del prompt, límite de salida e imágenes. Los costos NVIDIA sin tarifa verificable se muestran como desconocidos; la aplicación no los presenta como facturas ni afirma que el presupuesto estimado sea un límite monetario.
+
+Quality Loop conserva separados `technical_success` (CAD válido, sólido y exportable) y `quality_success` (aceptación de Quality Gate). El puntaje versionado (`ciel-quality-metrics-v1`) promedia las métricas disponibles ponderadas y renormaliza por la suma de sus pesos; las métricas esenciales deben estar disponibles. La aceptación requiere éxito técnico, topología 1.0, revisiones de código, visual y crítica aceptadas, ningún error crítico y puntuación mínima de **0,85**. Estos pesos son una regla del protocolo reproducible, no una certificación física ni una garantía de fidelidad.
+
+| Métrica | Mecánica precisa | Orgánica libre | Híbrida |
+|---|---:|---:|---:|
+| Cotas | 0,32 | 0,08 | 0,20 |
+| Topología | 0,12 | 0,08 | 0,11 |
+| Features | 0,24 | 0,19 | 0,22 |
+| Silueta semántica | 0,04 | 0,23 | 0,13 |
+| Proporciones | 0,04 | 0,14 | 0,08 |
+| Simetría declarada | 0,04 | 0,06 | 0,05 |
+| Centroide | 0,04 | 0,02 | 0,04 |
+| Área superficial | 0,04 | 0,03 | 0,04 |
+| Hausdorff P95 | 0,04 | 0,04 | 0,04 |
+| Volumen | 0,05 | 0,02 | 0,04 |
+| Silhouette IoU | 0,03 | 0,03 | 0,03 |
+| Consistencia de normales | 0,02 | 0,03 | 0,03 |
+| Semejanza con referencia | 0,06 | 0,10 | 0,06 |
+
+El informe conserva puntuaciones parciales, pesos, estado (`calculated`, `not_available`, `not_applicable` o `unsupported`), unidad, algoritmo, muestras, semilla, tolerancia, perfil y versión. La validez técnica no sustituye la semejanza geométrica: un CAD puede ser exportable y aun así fallar features, silueta o el Gate.
+
+Por defecto ningún rol de IA recibe la referencia STEP independiente. El evaluador solo mide contra ella si `QUALITY_ALLOW_REFERENCE_METRICS=1` y la ejecución está asociada a un caso; el informe identifica entonces el protocolo `quality-v1-reference-authorized`. Esa opción cambia el protocolo de evaluación y debe separarse de los resultados sin referencia. El endpoint `GET /api/proveedores/nvidia/catalogo` consulta el catálogo bajo demanda. Los IDs permitidos incluyen Nemotron 3 Ultra/Super, Laguna XS 2.1, Kimi K3, DeepSeek V4.1 Flash y GLM 5.3. `nvidia/cosmos3-nano-reasoner` no estaba en el catálogo comprobado para la clave actual y queda desactivado.
 
 ## Conjunto, referencias y campañas
 
@@ -61,7 +93,7 @@ La interfaz muestra los 60 casos y permite adjuntar a cada uno una **referencia 
 
 Para preparar una campaña, seleccionar casos, modelos, motores, modos, repeticiones y semilla; consultar primero la vista previa y luego guardar el borrador. **Guardar el borrador no llama a ninguna IA.** El botón «Iniciar campaña» sí activa la cola. Hay controles de pausa, reanudación, cancelación de pendientes y actualización del tope. Una repetición de 60 casos para Flash y Pro con los tres motores y dos modos programa **720 ejecuciones** y un máximo de **2.160 generaciones**. La vista muestra estados separados para desenlaces científicos, bloqueos, cancelaciones y pendientes.
 
-La parada se produce en el primer CAD válido y exportable. Cada motor produce STEP y STL; FreeCAD entrega además FCStd. Un verificador independiente vuelve a abrir STEP/STL antes de declarar éxito de exportación. Después se genera un STL común desde STEP y se estudian tanto la malla nativa como la común. Un fallo posterior del análisis no consume otro intento de IA ni convierte en fallo un CAD previamente exportado.
+En open-loop y closed-loop, la parada se produce en el primer CAD válido y exportable. En Quality Loop, cada candidato técnicamente correcto se mide y el programa termina únicamente cuando Quality Gate lo acepta o el presupuesto/ciclos se agotan. Cada motor produce STEP y STL; FreeCAD entrega además FCStd. Un verificador independiente vuelve a abrir STEP/STL antes de declarar éxito de exportación. Después se genera un STL común desde STEP y se estudian tanto la malla nativa como la común. Un fallo posterior del análisis no consume otro intento de IA ni convierte en fallo un CAD previamente exportado.
 
 ## Métricas
 
@@ -69,6 +101,7 @@ La parada se produce en el primer CAD válido y exportable. Cada motor produce S
 - **IR-CAD:** ejecuciones evaluables sin CAD válido y exportable, dividido entre N evaluable. No es necesariamente el complemento del Compile Rate.
 - **Watertight y DangEL:** se calculan sobre un STL final por ruta. Las tasas de malla informan el número de STL realmente analizados y su cobertura frente a la campaña.
 - **IoU B-Rep y Chamfer digital cuadrático bidireccional [mm²]:** solo se calculan con un STEP de referencia independiente. Chamfer usa 8.192 puntos por superficie y una semilla fija. Sin referencia aparece «sin referencia», no cero.
+- **Quality Loop:** el éxito técnico y el de calidad se publican en columnas separadas. El Quality Gate conserva la fórmula, pesos, versión, puntuaciones parciales, informes de revisores, artefactos multivista, candidatos y retroalimentación de reparación.
 - Los gráficos por iteración usan la propia cohorte closed-loop. El open-loop aparece como condición independiente; las comparaciones con CadQuery se calculan sobre pares de casos evaluables comunes.
 
 Los informes incompletos se rotulan provisionales. Las tasas con denominador cero se representan como no calculables. La interfaz ofrece CSV de métricas y JSON con el manifiesto, las respuestas, scripts, diagnósticos, archivos, topología y comparaciones. El JSON puede incluir respuestas y scripts extensos; se debe custodiar como evidencia de investigación.
@@ -85,11 +118,12 @@ Endpoints principales:
 
 | Ruta | Uso |
 |---|---|
-| `GET /api/opciones` | Motores, modos y modelos configurados |
+| `GET /api/opciones` | Motores, modos, modelos y presupuestos disponibles |
+| `GET /api/proveedores/nvidia/catalogo` | Consulta explícita del catálogo NVIDIA y roles configurados |
 | `GET /api/conjuntos` y `GET /api/conjuntos/{id}` | Conjuntos y 60 casos |
 | `PUT /api/casos/{id}/referencia` | STEP independiente y procedencia |
-| `POST /api/ejecuciones` | Generación individual |
-| `GET /api/ejecuciones/{id}` | Intentos, archivos y resultados digitales |
+| `POST /api/ejecuciones` | Generación individual; `modo=quality-loop` habilita el protocolo avanzado y `best_of_n` es opcional |
+| `GET /api/ejecuciones/{id}` | Intentos, archivos, plan y evidencia Quality Loop |
 | `POST /api/campanas/previsualizar` | Tamaño y costo estimado de la matriz |
 | `POST /api/campanas` | Borrador de campaña |
 | `POST /api/campanas/{id}/iniciar`, `/pausar`, `/cancelar` | Control de cola |
@@ -97,16 +131,16 @@ Endpoints principales:
 | `GET /api/campanas/{id}/metricas` | Tasas con denominadores y comparaciones |
 | `GET /api/campanas/{id}/metricas.csv` y `/datos.json` | Exportaciones |
 
-Pruebas del protocolo y bucles:
+Pruebas del protocolo, bucles y Quality Loop (todos los proveedores se simulan):
 
 ```text
-docker run --rm --network agente-ciel_default -v "$PWD/pruebas:/servicio/pruebas:ro" -v "$PWD/datos:/servicio/datos:ro" -v "$PWD/aplicacion:/servicio/aplicacion:ro" -v "$PWD/motores:/servicio/motores:ro" ciel-aplicacion:piloto python -m unittest discover -s pruebas -v
+  docker run --rm --network agente-ciel_default -v "$PWD:/servicio:ro" ciel-aplicacion:piloto python -m unittest discover -s pruebas -v
 ```
 
 Pruebas geométricas del evaluador:
 
 ```text
-docker run --rm -v "$PWD/pruebas:/servicio/pruebas:ro" -v "$PWD/evaluador:/servicio/evaluador:ro" ciel-evaluador:piloto python -m unittest discover -s pruebas -p test_evaluador.py -v
+  docker run --rm -v "$PWD:/servicio:ro" ciel-evaluador:piloto python -m unittest discover -s pruebas -p test_evaluador.py -v
 ```
 
 El piloto real B01 ejecutó 12 condiciones (Flash/Pro × tres motores × dos modos); las 12 generaron STEP/STL/FCStd cuando correspondía, se analizaron ambas rutas STL y se compararon con una referencia manual independiente. Es una prueba de integración de un caso básico, **no** un resultado estadístico de la matriz de 60 casos. La campaña principal de 720 ejecuciones permanece como borrador hasta que se inicie expresamente desde la interfaz o API.

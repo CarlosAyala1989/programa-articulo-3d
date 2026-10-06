@@ -18,6 +18,37 @@ const nombresModelo = {
   'deepseek-v4-pro': 'DeepSeek Pro',
 };
 
+function valorMetrica(registro) {
+  if (!registro) return 'No disponible';
+  if (registro.estado !== 'calculated') return registro.estado.replaceAll('_', ' ');
+  const valor = registro.valor;
+  if (typeof valor === 'number') return valor.toFixed(4);
+  if (typeof valor?.score === 'number') return `${(valor.score * 100).toFixed(1)} %`;
+  if (typeof valor?.error_mm === 'number') return `error ${valor.error_mm.toFixed(3)} mm`;
+  return 'Calculada';
+}
+
+function InformeCalidad({ informe }) {
+  const puntuaciones = informe.quality_metrics?.puntuaciones || {};
+  const codigo = informe.code_review || {};
+  const visual = informe.visual_review;
+  const compuerta = informe.quality_gate || {};
+  return <details key={informe.candidate_id}>
+    <summary><span className={`etiqueta ${informe.quality_success ? 'correcto' : ''}`}>{informe.quality_success ? '✓' : '!'}</span><strong>{informe.candidate_id}</strong><small>{informe.seleccionado_final ? 'Ganador final' : informe.seleccionado_para_reparacion ? 'Base de reparación' : 'Candidato'}</small></summary>
+    <div className="detalle informe-calidad">
+      <p><strong>Éxito técnico:</strong> {informe.technical_success ? 'CAD válido y exportable' : 'No se validó técnicamente'} · <strong>Quality Gate:</strong> {compuerta.accepted ? 'aceptado' : 'rechazado'}{typeof compuerta.quality_score === 'number' ? ` · ${(compuerta.quality_score * 100).toFixed(1)} %` : ''}</p>
+      <p><strong>Revisión de código:</strong> {codigo.estado || (codigo.accepted ? 'aceptado' : 'rechazado')} {codigo.severity && `· severidad ${codigo.severity}`}</p>
+      {Object.keys(puntuaciones).length > 0 && <><h4>Métricas</h4><div className="metricas-calidad">{Object.entries(puntuaciones).map(([nombre, registro]) => <div key={nombre}><small>{nombre.replaceAll('_', ' ')}</small><strong>{valorMetrica(registro)}</strong></div>)}</div></>}
+      {visual && <p><strong>Revisión visual:</strong> {visual.accepted ? 'aceptada' : 'rechazada'} · silueta {(visual.puntuacion_silueta * 100).toFixed(0)} % · proporciones {(visual.puntuacion_proporciones * 100).toFixed(0)} % · features {(visual.puntuacion_features * 100).toFixed(0)} %</p>}
+      {informe.critic_review?.observacion && <p><strong>Crítica geométrica:</strong> {informe.critic_review.observacion}</p>}
+      {informe.preserved_features?.length > 0 && <p><strong>Preservar en reparación:</strong> {informe.preserved_features.join(', ')}</p>}
+      {informe.repair_priority?.length > 0 && <p><strong>Prioridad de reparación:</strong> {informe.repair_priority.join(', ')}</p>}
+      {informe.diagnostico && <p>{informe.diagnostico}</p>}
+      <small>Protocolo de referencia: {informe.reference_protocol || 'sin referencia'}</small>
+    </div>
+  </details>;
+}
+
 const paginas = {
   generar: ['Generar pieza', 'Describe la geometría y elige cómo construirla.'],
   resultado: ['Resultado 3D', 'Revisa el modelo, los intentos y los archivos de tu ejecución.'],
@@ -156,6 +187,7 @@ function Aplicacion() {
   const [modelo, cambiarModelo] = useState('');
   const [esfuerzo, cambiarEsfuerzo] = useState('max');
   const [modo, cambiarModo] = useState('closed-loop');
+  const [bestOfN, cambiarBestOfN] = useState(false);
   const [casoSeleccionado, cambiarCasoSeleccionado] = useState(null);
   const [opciones, cambiarOpciones] = useState(null);
   const [identificador, cambiarIdentificador] = useState(() => leerRuta().identificador || localStorage.getItem('ciel_ultima_ejecucion') || '');
@@ -226,6 +258,7 @@ function Aplicacion() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ descripcion, caso_identificador: casoSeleccionado?.identificador || null, motor, modelo, modo,
+          best_of_n: modo === 'quality-loop' && bestOfN,
           esfuerzo_razonamiento: nivelesEsfuerzo(opciones, modelo) ? esfuerzo : null }),
       });
       const datos = await respuesta.json();
@@ -265,8 +298,9 @@ function Aplicacion() {
           <textarea id="descripcion" value={descripcion} onChange={(evento) => { cambiarDescripcion(evento.target.value); cambiarCasoSeleccionado(null); }} minLength={12} maxLength={4000} rows={7} placeholder="Dimensiones en milímetros, agujeros, radios, posiciones y otras restricciones…" required />
           <div className="contador">{descripcion.length} / 4000 caracteres</div>
           <div className="campos"><div><label htmlFor="modelo">MODELO DE IA</label><select id="modelo" value={modelo} onChange={(evento) => cambiarModelo(evento.target.value)} required><option value="">Selecciona un modelo</option>{Object.entries(opciones?.modelos || nombresModelo).map(([clave, nombre]) => <option value={clave} key={clave}>{nombre}</option>)}</select></div><CampoEsfuerzo identificador="esfuerzo" modelo={modelo} opciones={opciones} valor={esfuerzo} alCambiar={cambiarEsfuerzo} /></div>
-          <div className="campos"><div><label htmlFor="motor">MOTOR CAD</label><select id="motor" value={motor} onChange={(evento) => cambiarMotor(evento.target.value)}>{Object.entries(opciones?.motores || nombresMotor).map(([clave, nombre]) => <option value={clave} key={clave}>{nombre}</option>)}</select></div><div><label htmlFor="modo">ESTRATEGIA</label><select id="modo" value={modo} onChange={(evento) => cambiarModo(evento.target.value)}><option value="open-loop">Open-loop · una generación</option><option value="closed-loop">Closed-loop · hasta cinco</option></select></div></div>
-          <div className="nota">{modo === 'closed-loop' ? <>Hasta <strong>5 generaciones totales</strong>: una inicial y cuatro correcciones si son necesarias.</> : <><strong>Una generación</strong> sin feedback ni corrección.</>} Se detiene al obtener CAD válido y exportable.</div>
+          <div className="campos"><div><label htmlFor="motor">MOTOR CAD</label><select id="motor" value={motor} onChange={(evento) => cambiarMotor(evento.target.value)}>{Object.entries(opciones?.motores || nombresMotor).map(([clave, nombre]) => <option value={clave} key={clave}>{nombre}</option>)}</select></div><div><label htmlFor="modo">ESTRATEGIA</label><select id="modo" value={modo} onChange={(evento) => cambiarModo(evento.target.value)}><option value="open-loop">Open-loop · una generación</option><option value="closed-loop">Closed-loop · hasta cinco</option><option value="quality-loop" disabled={!opciones?.quality_loop?.disponible}>Quality Loop · métricas y revisión{!opciones?.quality_loop?.disponible ? ' (NVIDIA no configurado)' : ''}</option></select></div></div>
+          {modo === 'quality-loop' && <label className="opcion-best"><input type="checkbox" checked={bestOfN} onChange={(evento) => cambiarBestOfN(evento.target.checked)} /><span><strong>Best-of-N</strong><small>Generar y comparar hasta 3 candidatos por ciclo. Aumenta el uso de modelos; no es comparable directamente con los modos históricos.</small></span></label>}
+          <div className="nota">{modo === 'closed-loop' ? <>Hasta <strong>5 generaciones totales</strong>: una inicial y cuatro correcciones si son necesarias.</> : modo === 'quality-loop' ? <>Planner, revisor de código, evaluación CAD y revisión visual; máximo <strong>{opciones?.quality_loop?.maximo_iteraciones || 3} ciclos</strong>, <strong>{opciones?.quality_loop?.maximo_llamadas_ia || 40} llamadas IA</strong> y <strong>{((opciones?.quality_loop?.maximo_tokens_estimados || 800000) / 1000).toFixed(0)} mil tokens presupuestados</strong>. La validez técnica y la aceptación geométrica se reportan por separado.</> : <><strong>Una generación</strong> sin feedback ni corrección.</>} {modo !== 'quality-loop' && 'Se detiene al obtener CAD válido y exportable.'}</div>
           {error && <p className="error" role="alert">{error}</p>}
           <button className="boton" disabled={enviando || !modelo || descripcion.trim().length < 12}>{enviando ? 'Iniciando…' : 'Generar pieza 3D'} <span>↗</span></button>
         </form>
@@ -280,9 +314,11 @@ function Aplicacion() {
         {problemaResultado && <p className="error" role="alert">{problemaResultado}</p>}
         {!ejecucion && <div className="vacio"><div className="vacio-cubo">◇</div><strong>{identificador ? 'Consultando la ejecución' : 'Aún no hay una pieza'}</strong><p>{identificador ? 'El resultado aparecerá aquí cuando la ejecución esté disponible.' : 'Al iniciar una generación verás aquí los intentos, la vista previa y los archivos.'}</p></div>}
         {ejecucion && <>
-          <div className={`estado ${colorEstado}`}><span>{ejecucion.estado === 'completada' ? '✓' : ejecucion.estado === 'generando' || ejecucion.estado === 'pendiente' ? '◌' : '!'}</span><div><strong>{ejecucion.estado === 'completada' ? 'Pieza generada' : ejecucion.estado === 'fallida' ? 'Sin CAD válido' : ejecucion.estado === 'bloqueada' ? 'Ejecución interrumpida' : 'Generando y validando'}</strong><small>{ejecucion.mensaje}</small></div></div>
+          <div className={`estado ${colorEstado}`}><span>{ejecucion.estado === 'completada' ? '✓' : ejecucion.estado === 'generando' || ejecucion.estado === 'pendiente' ? '◌' : '!'}</span><div><strong>{ejecucion.modo === 'quality-loop' ? ejecucion.quality_success ? 'CAD aceptado por Quality Gate' : ejecucion.technical_success ? 'CAD técnicamente válido · calidad rechazada' : ejecucion.estado === 'generando' || ejecucion.estado === 'pendiente' ? 'Quality Loop en curso' : 'Quality Loop sin aceptación' : ejecucion.estado === 'completada' ? 'Pieza generada' : ejecucion.estado === 'fallida' ? 'Sin CAD válido' : ejecucion.estado === 'bloqueada' ? 'Ejecución interrumpida' : 'Generando y validando'}</strong><small>{ejecucion.mensaje}</small></div></div>
           <p className="descripcion-resultado">{ejecucion.descripcion}</p>
-          <div className="resumen resumen-cuatro"><div><small>MOTOR</small><strong>{nombresMotor[ejecucion.motor]}</strong></div><div><small>MODELO</small><strong>{opciones?.modelos?.[ejecucion.modelo] || nombresModelo[ejecucion.modelo] || ejecucion.modelo}</strong></div><div><small>ESFUERZO</small><strong>{nombresEsfuerzo[ejecucion.esfuerzo_razonamiento] || (nivelesEsfuerzo(opciones, ejecucion.modelo) ? 'Sin registro' : 'No aplica')}</strong></div><div><small>INTENTOS</small><strong>{ejecucion.numero_intentos} / {ejecucion.modo === 'open-loop' ? 1 : 5}</strong></div></div>
+          <div className="resumen resumen-cuatro"><div><small>MOTOR</small><strong>{nombresMotor[ejecucion.motor]}</strong></div><div><small>MODELO</small><strong>{opciones?.modelos?.[ejecucion.modelo] || nombresModelo[ejecucion.modelo] || ejecucion.modelo}</strong></div><div><small>ESFUERZO</small><strong>{nombresEsfuerzo[ejecucion.esfuerzo_razonamiento] || (nivelesEsfuerzo(opciones, ejecucion.modelo) ? 'Sin registro' : 'No aplica')}</strong></div><div><small>{ejecucion.modo === 'quality-loop' ? 'CANDIDATOS' : 'INTENTOS'}</small><strong>{ejecucion.numero_intentos} / {ejecucion.modo === 'open-loop' ? 1 : ejecucion.modo === 'quality-loop' ? `${(ejecucion.calidad?.maximo_iteraciones || 3) * (ejecucion.calidad?.maximo_candidatos_por_iteracion || 1)}` : 5}</strong></div></div>
+          {ejecucion.modo === 'quality-loop' && ejecucion.calidad?.geometric_plan && <div className="historial"><h3>Geometric Plan · {ejecucion.calidad.plan_version}</h3><p className="nota-campana">{ejecucion.calidad.geometric_plan.clase_modelado} · Planner {ejecucion.calidad.planner_model} · {ejecucion.calidad.planner_provider}</p><details><summary>Ver plan geométrico y features</summary><div className="detalle"><p><strong>Clase:</strong> {ejecucion.calidad.geometric_plan.clase_modelado} · <strong>Unidades:</strong> {ejecucion.calidad.geometric_plan.unidades}</p><ul>{ejecucion.calidad.geometric_plan.features.map((feature) => <li key={feature.feature_id}><strong>{feature.feature_id}</strong> · {feature.nombre} ({feature.tipo}){feature.descripcion && ` — ${feature.descripcion}`}</li>)}</ul><p><strong>Operaciones:</strong> {(ejecucion.calidad.geometric_plan.operaciones || []).join(', ') || 'No declaradas'}</p></div></details></div>}
+          {ejecucion.modo === 'quality-loop' && <div className="historial"><h3>Resultado de calidad</h3><p className="nota-campana"><strong>CAD técnicamente válido:</strong> {ejecucion.technical_success ? 'Sí' : 'No'} · <strong>Quality Gate aceptado:</strong> {ejecucion.quality_success ? 'Sí' : 'No'} · <strong>Puntuación:</strong> {typeof ejecucion.calidad?.quality_score === 'number' ? `${(ejecucion.calidad.quality_score * 100).toFixed(1)} %` : 'No calculada'} · <strong>Llamadas IA:</strong> {ejecucion.calidad?.llamadas_ia || 0}/{ejecucion.calidad?.maximo_llamadas_ia || 40} · <strong>Tokens presupuestados:</strong> {ejecucion.calidad?.tokens_presupuestados || 0}/{ejecucion.calidad?.maximo_tokens_presupuestados || 800000}</p>{ejecucion.informes_calidad?.map((informe) => <InformeCalidad key={informe.candidate_id} informe={informe} />)}{ejecucion.calidad?.ranking_global?.length > 0 && <details><summary>Ranking de candidatos</summary><div className="detalle">{ejecucion.calidad.ranking_global.map((item) => <p key={item.candidate_id}>{item.candidate_id} · ciclo {item.iteracion} · {item.technical_success ? 'CAD válido' : 'CAD no válido'} · {item.quality_success ? 'aceptado' : 'rechazado'} · {typeof item.quality_score === 'number' ? `${(item.quality_score * 100).toFixed(1)} %` : 'sin puntuación'}{item.seleccionado_final ? ' · GANADOR' : ''}</p>)}</div></details>}</div>}
           {activo && <div className="barra"><span /></div>}
           {archivoStl && <><VisorPieza url={archivoStl.url} /><p className="ayuda-visor">Arrastra para girar 360° en cualquier dirección · rueda para acercar · clic derecho y arrastra para desplazar</p></>}
           {ejecucion.archivos.length > 0 && <div className="entregables"><h3>Archivos de la pieza</h3><div className="lista-archivos">{ejecucion.archivos.map((archivo) => <a key={archivo.nombre} href={archivo.url} download><span>↓</span><strong>{archivo.nombre}</strong><small>{(archivo.tamano_bytes / 1024).toFixed(1)} KB</small></a>)}</div></div>}

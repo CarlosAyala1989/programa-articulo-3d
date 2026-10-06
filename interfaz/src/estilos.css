@@ -146,6 +146,11 @@ textarea::placeholder, input::placeholder { color: var(--tenue); opacity: 1; }
 .campos { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 22px; }
 .campos > div { min-width: 0; }
 select { width: 100%; min-height: 42px; padding: 0 10px; font-size: 12px; }
+.opcion-best { display: flex; align-items: flex-start; gap: 10px; margin-top: 16px; padding: 13px; border: 1px solid var(--borde); border-radius: 8px; background: var(--superficie-suave); cursor: pointer; }
+.opcion-best input { margin: 2px 0 0; accent-color: var(--azul); }
+.opcion-best span, .opcion-best strong, .opcion-best small { display: block; }
+.opcion-best strong { color: var(--texto); font-size: 12px; }
+.opcion-best small { margin-top: 5px; color: var(--secundario); font-size: 11px; line-height: 1.5; }
 .nota { background: var(--superficie-suave); border: 1px solid var(--linea); color: var(--secundario); border-radius: 8px; padding: 13px 14px; font-size: 12px; line-height: 1.6; margin: 22px 0; }
 .nota strong { color: var(--texto); font-weight: 600; }
 .boton { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 46px; padding: 0 16px; border: 1px solid transparent; border-radius: 9px; background: var(--azul); color: #fff; font-size: 13px; font-weight: 600; }
@@ -201,6 +206,12 @@ select { width: 100%; min-height: 42px; padding: 0 10px; font-size: 12px; }
 .retroalimentacion pre { margin: 12px; }
 .detalle pre { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--texto); background: var(--campo); border: 1px solid var(--linea); padding: 13px; border-radius: 6px; max-height: 250px; overflow: auto; font: 11px/1.6 ui-monospace, 'SFMono-Regular', Consolas, monospace; }
 .detalle > small { color: var(--tenue); font-size: 11px; }
+.informe-calidad h4 { margin: 16px 0 8px; color: var(--secundario); font-size: 11px; text-transform: uppercase; letter-spacing: .6px; }
+.metricas-calidad { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin: 10px 0 14px; }
+.metricas-calidad > div { padding: 10px; border: 1px solid var(--linea); border-radius: 7px; background: var(--superficie-suave); }
+.metricas-calidad small, .metricas-calidad strong { display: block; }
+.metricas-calidad small { margin-bottom: 5px; color: var(--tenue); font-size: 9px; text-transform: uppercase; }
+.metricas-calidad strong { color: var(--texto); font-size: 12px; text-transform: capitalize; }
 .error { padding: 12px 14px; border: 1px solid var(--borde); border-radius: 8px; background: var(--error-suave); color: var(--error); font-size: 12px; line-height: 1.6; }
 footer { padding: 28px 0; color: var(--tenue); font-size: 9px; letter-spacing: 1px; text-align: center; }
 

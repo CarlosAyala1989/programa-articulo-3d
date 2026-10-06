@@ -4,6 +4,7 @@ import csv
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
 from typing import Literal
 from uuid import uuid4
@@ -18,12 +19,14 @@ from sqlalchemy.orm import selectinload
 
 from aplicacion.base_datos import (
     ArchivoGenerado, Campana, CasoDiseno, ComparacionDigital, Ejecucion,
-    InformeTopologia, VersionConjunto, crear_sesion, crear_tablas,
+    InformeCalidad, InformeTopologia, VersionConjunto, crear_sesion, crear_tablas,
 )
 from aplicacion.campanas import cambiar_estado, crear_campana, previsualizar, resumen_campana, validar_matriz
 from aplicacion.configuracion import (
     DIRECTORIO_ARTEFACTOS, MODELOS_DISPONIBLES, MODELOS_LOCALES, MOTORES_DISPONIBLES, URL_EVALUADOR,
     ESFUERZOS_DISPONIBLES, ESFUERZO_PREDETERMINADO, resolver_esfuerzo,
+    MAXIMO_ITERACIONES_QUALITY_LOOP, MAXIMO_LLAMADAS_QUALITY_LOOP,
+    MAXIMO_TOKENS_QUALITY_LOOP, MAXIMO_TOKENS_SALIDA_QUALITY_GENERADOR,
 )
 from aplicacion.conjuntos import (
     cargar_conjunto_principal, importar_csv, importar_documento, resumen_conjunto,
@@ -31,6 +34,7 @@ from aplicacion.conjuntos import (
 )
 from aplicacion.metricas import calcular_metricas_campana
 from aplicacion.proveedores import modelos_configurados, verificar_modelo_local
+from aplicacion.calidad.nvidia import ErrorNvidia, ProveedorNvidia, catalogo_roles
 from aplicacion.proveedor_deepseek import ErrorProveedor
 from aplicacion.tareas import tarea_analisis, tarea_campana, tarea_generacion
 
@@ -47,7 +51,8 @@ class SolicitudGeneracion(BaseModel):
     motor: str
     modelo: str
     esfuerzo_razonamiento: Literal["low", "high", "max"] | None = None
-    modo: str = "closed-loop"
+    modo: Literal["open-loop", "closed-loop", "quality-loop"] = "closed-loop"
+    best_of_n: bool = False
 
 
 class SolicitudImportacion(BaseModel):
@@ -89,14 +94,35 @@ def consultar_salud() -> dict:
 
 @aplicacion.get("/api/opciones")
 def consultar_opciones() -> dict:
+    nvidia_configurada = bool(os.environ.get("NVIDIA_API_KEY", "").strip())
     return {
         "motores": MOTORES_DISPONIBLES, "modelos": modelos_configurados(),
         "modelos_locales_catalogo": MODELOS_LOCALES,
         "esfuerzos_por_modelo": {modelo: ESFUERZOS_DISPONIBLES for modelo in MODELOS_DISPONIBLES},
         "esfuerzo_predeterminado": ESFUERZO_PREDETERMINADO,
-        "modos": {"open-loop": "Una generación", "closed-loop": "Hasta cinco reparaciones"},
+        "modos": {"open-loop": "Una generación", "closed-loop": "Hasta cinco reparaciones",
+                  "quality-loop": "Plan geométrico, métricas y hasta tres ciclos"},
         "intentos_maximos": 5,
+        "quality_loop": {"disponible": nvidia_configurada,
+            "maximo_iteraciones": MAXIMO_ITERACIONES_QUALITY_LOOP,
+            "maximo_llamadas_ia": MAXIMO_LLAMADAS_QUALITY_LOOP,
+            "maximo_tokens_estimados": MAXIMO_TOKENS_QUALITY_LOOP,
+            "maximo_tokens_salida_generador": MAXIMO_TOKENS_SALIDA_QUALITY_GENERADOR,
+            "candidatos_best_of_n": 3,
+            "modelo_nvidia_generador": "deepseek-ai/deepseek-v4.1-flash",
+            "roles": catalogo_roles(),
+            "referencia_habilitada": os.environ.get("QUALITY_ALLOW_REFERENCE_METRICS", "0") == "1"},
     }
+
+
+@aplicacion.get("/api/proveedores/nvidia/catalogo")
+def consultar_catalogo_nvidia() -> dict:
+    try:
+        modelos = ProveedorNvidia().listar_modelos()
+    except ErrorNvidia as error:
+        raise HTTPException(503, str(error)) from None
+    return {"proveedor": "nvidia_nim", "modelos": modelos,
+            "roles_configurados": catalogo_roles()}
 
 
 @aplicacion.get("/api/modelos-locales/estado")
@@ -241,8 +267,10 @@ def iniciar_generacion(solicitud: SolicitudGeneracion) -> dict:
         esfuerzo = resolver_esfuerzo(solicitud.modelo, solicitud.esfuerzo_razonamiento)
     except ValueError as error:
         raise HTTPException(422, str(error)) from error
-    if solicitud.modo not in {"open-loop", "closed-loop"}:
-        raise HTTPException(422, "Modo no reconocido")
+    if solicitud.modo == "quality-loop" and not os.environ.get("NVIDIA_API_KEY", "").strip():
+        raise HTTPException(503, "Quality Loop requiere NVIDIA_API_KEY configurada en el backend y el trabajador")
+    if solicitud.best_of_n and solicitud.modo != "quality-loop":
+        raise HTTPException(422, "best_of_n solo está disponible en Quality Loop")
     descripcion = (solicitud.descripcion or "").strip()
     if solicitud.caso_identificador:
         with crear_sesion() as sesion:
@@ -259,7 +287,9 @@ def iniciar_generacion(solicitud: SolicitudGeneracion) -> dict:
             motor=solicitud.motor, modelo=solicitud.modelo,
             esfuerzo_razonamiento=esfuerzo,
             caso_identificador=solicitud.caso_identificador,
-            modo=solicitud.modo, maximo_intentos=1 if solicitud.modo == "open-loop" else 5,
+            modo=solicitud.modo, maximo_intentos=(1 if solicitud.modo == "open-loop"
+                else MAXIMO_ITERACIONES_QUALITY_LOOP if solicitud.modo == "quality-loop" else 5),
+            configuracion_calidad={"best_of_n": solicitud.best_of_n} if solicitud.modo == "quality-loop" else None,
             estado="pendiente", mensaje="Trabajo en cola",
         ))
         sesion.commit()
@@ -275,7 +305,8 @@ def iniciar_generacion(solicitud: SolicitudGeneracion) -> dict:
     return {"identificador": identificador, "estado": "pendiente"}
 
 
-def serializar_ejecucion(ejecucion: Ejecucion, topologias: list, comparacion) -> dict:
+def serializar_ejecucion(ejecucion: Ejecucion, topologias: list, comparacion,
+                         informes_calidad: list | None = None) -> dict:
     esfuerzo = ejecucion.esfuerzo_razonamiento or next((
         (intento.solicitud_modelo or {}).get("perfil", {}).get("reasoning_effort")
         for intento in ejecucion.intentos if (intento.solicitud_modelo or {}).get("perfil")
@@ -292,6 +323,16 @@ def serializar_ejecucion(ejecucion: Ejecucion, topologias: list, comparacion) ->
         "primer_exito_ejecucion": ejecucion.primer_exito_ejecucion,
         "primer_exito_cad": ejecucion.primer_exito_cad,
         "primer_exito_exportacion": ejecucion.primer_exito_exportacion,
+        "technical_success": ((ejecucion.configuracion_calidad or {}).get("technical_success")
+                              if ejecucion.modo == "quality-loop"
+                              else bool(ejecucion.primer_exito_exportacion)),
+        "quality_success": ((ejecucion.configuracion_calidad or {}).get("quality_success")
+                            if ejecucion.modo == "quality-loop" else None),
+        "calidad": ejecucion.configuracion_calidad if ejecucion.modo == "quality-loop" else None,
+        "informes_calidad": [{"iteracion": informe.iteracion,
+            "candidate_id": informe.candidate_id, "parent_candidate_id": informe.parent_candidate_id,
+            "intento_identificador": informe.intento_identificador,
+            **informe.resultado} for informe in (informes_calidad or [])],
         "fecha_creacion": ejecucion.fecha_creacion,
         "fecha_inicio": ejecucion.fecha_inicio, "fecha_fin": ejecucion.fecha_fin,
         "intentos": [{
@@ -348,7 +389,10 @@ def consultar_ejecucion(identificador: str) -> dict:
         comparacion = sesion.scalar(select(ComparacionDigital).where(
             ComparacionDigital.ejecucion_identificador == identificador
         ))
-        return serializar_ejecucion(ejecucion, topologias, comparacion)
+        informes_calidad = list(sesion.scalars(select(InformeCalidad).where(
+            InformeCalidad.ejecucion_identificador == identificador
+        ).order_by(InformeCalidad.iteracion, InformeCalidad.identificador)))
+        return serializar_ejecucion(ejecucion, topologias, comparacion, informes_calidad)
 
 
 @aplicacion.post("/api/ejecuciones/{identificador}/reanalizar", status_code=202)

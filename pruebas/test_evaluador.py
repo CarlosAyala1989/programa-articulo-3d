@@ -8,7 +8,11 @@ from unittest.mock import patch
 try:
     import cadquery as cq
     import trimesh
-    from evaluador.api import SolicitudAnalisis, analizar, analizar_malla, comparar, leer_malla
+    from evaluador.api import (
+        SolicitudAnalisis, _comparar_superficies, _simetrias, analizar, analizar_malla,
+        comparar, leer_malla,
+    )
+    from evaluador.renderizado import renderizar_lamina
 except ImportError:
     cq = None
 
@@ -62,6 +66,45 @@ class GeometriaDigital(unittest.TestCase):
             self.assertEqual(resultado["nativa"]["estado"], "analizada")
             self.assertEqual(resultado["comun"]["estado"], "analizada")
             self.assertEqual(resultado["comparacion"]["estado"], "no_calculable")
+
+    def test_metricas_de_superficie_identica_y_render_multivista_determinista(self):
+        with tempfile.TemporaryDirectory() as temporal:
+            ruta = Path(temporal) / "cubo.stl"
+            forma = cq.Workplane("XY").box(10, 10, 10).val()
+            cq.exporters.export(forma, str(ruta), exportType="STL", tolerance=0.1,
+                                angularTolerance=0.1)
+            malla = leer_malla(ruta)
+            metricas = _comparar_superficies(forma, forma, malla, malla)
+            self.assertAlmostEqual(metricas["centroid_error_mm"], 0.0, places=8)
+            self.assertEqual(metricas["bounding_box_error_mm"], {"x": 0.0, "y": 0.0, "z": 0.0})
+            self.assertAlmostEqual(metricas["surface_area_error_relative"], 0.0, places=8)
+            self.assertAlmostEqual(metricas["hausdorff_robusto_mm"]["p95"], 0.0, places=8)
+            self.assertAlmostEqual(metricas["chamfer_digital_mm2"], 0.0, places=8)
+            self.assertAlmostEqual(metricas["silhouette_iou"]["iou_medio"], 1.0, places=8)
+            self.assertGreater(metricas["normal_consistency"], 0.99)
+            simetria = _simetrias({"simetrias": [{"eje": "x"}],
+                                  "sistema_coordenadas": {"origen": [0, 0, 0]}}, malla)
+            self.assertAlmostEqual(simetria["valor"], 1.0, places=8)
+            lamina_1, perfil_1 = renderizar_lamina(malla)
+            lamina_2, perfil_2 = renderizar_lamina(malla)
+            self.assertEqual(lamina_1, lamina_2)
+            self.assertEqual(perfil_1, perfil_2)
+            self.assertEqual(perfil_1["version"], "ciel-ortho-render-v1")
+
+    def test_error_de_centroide_y_cotas_detectan_traslacion(self):
+        with tempfile.TemporaryDirectory() as temporal:
+            raiz = Path(temporal)
+            base = cq.Workplane("XY").box(10, 10, 10).val()
+            corrida = base.translate((5, 0, 0))
+            for nombre, forma in (("base", base), ("corrida", corrida)):
+                cq.exporters.export(forma, str(raiz / f"{nombre}.stl"), exportType="STL",
+                                    tolerance=0.1, angularTolerance=0.1)
+            metricas = _comparar_superficies(base, corrida,
+                leer_malla(raiz / "base.stl"), leer_malla(raiz / "corrida.stl"))
+            self.assertAlmostEqual(metricas["centroid_error_mm"], 5.0, places=3)
+            for error in metricas["bounding_box_error_mm"].values():
+                self.assertAlmostEqual(error, 0.0, places=8)
+            self.assertGreater(metricas["hausdorff_robusto_mm"]["p95"], 0)
 
 
 if __name__ == "__main__":

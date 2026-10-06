@@ -2,6 +2,8 @@
 
 import base64
 import hashlib
+import json
+import os
 import re
 import tempfile
 from pathlib import Path
@@ -10,8 +12,10 @@ import cadquery as cq
 import numpy as np
 import trimesh
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from scipy.spatial import cKDTree
+
+from evaluador.renderizado import comparar_siluetas, renderizar_lamina
 
 
 aplicacion = FastAPI(title="Evaluador CAD digital")
@@ -32,6 +36,13 @@ class SolicitudReferencia(BaseModel):
 
 class SolicitudVerificacion(BaseModel):
     archivos: dict[str, str]
+
+
+class SolicitudInspeccionCalidad(BaseModel):
+    archivos: dict[str, str]
+    plan_geometrico: dict = Field(max_length=200)
+    caso_identificador: str | None = None
+    usar_referencia: bool = False
 
 
 def ruta_ejecucion(identificador: str, nombre: str) -> Path:
@@ -130,9 +141,244 @@ def comparar(forma, referencia, malla_generada, malla_referencia) -> dict:
     }
 
 
+def _cajas(forma) -> dict:
+    caja = forma.BoundingBox()
+    centro = forma.Center()
+    return {
+        "bounding_box_mm": {"x": float(caja.xlen), "y": float(caja.ylen), "z": float(caja.zlen)},
+        "centroide_mm": [float(centro.x), float(centro.y), float(centro.z)],
+        "volumen_mm3": float(forma.Volume()), "area_mm2": float(forma.Area()),
+        "solidos": len(forma.Solids()), "brep_valido": bool(forma.isValid()),
+    }
+
+
+def _cilindros(forma) -> list[dict]:
+    from OCP.BRepAdaptor import BRepAdaptor_Surface
+
+    encontrados = []
+    for cara in forma.Faces():
+        if cara.geomType() != "CYLINDER":
+            continue
+        cilindro = BRepAdaptor_Surface(cara.wrapped).Cylinder()
+        eje = cilindro.Axis().Direction()
+        origen = cilindro.Axis().Location()
+        datos = {"radio_mm": float(cilindro.Radius()),
+                 "eje": [float(eje.X()), float(eje.Y()), float(eje.Z())],
+                 "origen_eje_mm": [float(origen.X()), float(origen.Y()), float(origen.Z())]}
+        duplicado = False
+        for previo in encontrados:
+            mismo_radio = abs(previo["radio_mm"] - datos["radio_mm"]) < 0.01
+            paralelo = abs(float(np.dot(previo["eje"], datos["eje"]))) > 0.999
+            delta = np.asarray(datos["origen_eje_mm"]) - np.asarray(previo["origen_eje_mm"])
+            distancia_ejes = np.linalg.norm(delta - np.dot(delta, previo["eje"]) * np.asarray(previo["eje"]))
+            if mismo_radio and paralelo and distancia_ejes < 0.02:
+                duplicado = True
+                break
+        if not duplicado:
+            encontrados.append(datos)
+    return encontrados
+
+
+def _verificar_agujeros(plan: dict, cilindros: list[dict]) -> dict:
+    features = {}
+    for feature in plan.get("features", []):
+        tipo = str(feature.get("tipo", "")).casefold()
+        if not any(termino in tipo for termino in ("hole", "agujero")):
+            continue
+        feature_id = feature.get("feature_id")
+        if not isinstance(feature_id, str):
+            continue
+        dimensiones = feature.get("dimensiones") or {}
+        dimension = next((d for n, d in dimensiones.items()
+                          if n.casefold() in {"diameter", "diametro", "diámetro"}
+                          and isinstance(d, dict) and isinstance(d.get("valor"), (int, float))), None)
+        cantidad_dimension = next((d for n, d in dimensiones.items()
+                          if n.casefold() in {"count", "cantidad", "number"}
+                          and isinstance(d, dict) and isinstance(d.get("valor"), (int, float))), None)
+        esperado = float(dimension["valor"]) if dimension else None
+        cantidad_esperada = float(cantidad_dimension["valor"]) if cantidad_dimension else None
+        eje_esperado = feature.get("eje")
+        posicion = feature.get("posicion") or {}
+        posicion_esperada = [posicion.get(eje, {}).get("valor") for eje in ("x", "y", "z")]
+        candidatos = []
+        for cilindro in cilindros:
+            tolerancia = float(dimension.get("tolerancia") or 0.15) if dimension else 0.15
+            if esperado is not None and abs(2 * cilindro["radio_mm"] - esperado) > tolerancia:
+                continue
+            if eje_esperado and isinstance(eje_esperado, (list, tuple)) and len(eje_esperado) == 3:
+                alineacion = abs(float(np.dot(cilindro["eje"], np.asarray(eje_esperado, dtype=float))))
+                if alineacion < 0.98:
+                    continue
+            if all(isinstance(valor, (int, float)) for valor in posicion_esperada):
+                delta = np.asarray(posicion_esperada) - np.asarray(cilindro["origen_eje_mm"])
+                eje = np.asarray(cilindro["eje"])
+                if np.linalg.norm(delta - np.dot(delta, eje) * eje) > 0.5:
+                    continue
+            candidatos.append(cilindro)
+        features[feature_id] = {"estado": "calculated", "cantidad": len(candidatos),
+                                "cantidad_esperada": cantidad_esperada,
+                                "diametro_mm": 2 * candidatos[0]["radio_mm"] if candidatos else None,
+                                "cilindros_verificados": candidatos,
+                                "algoritmo": "OCP BRepAdaptor_Surface CYLINDER; agrupación por radio y eje"}
+    for criterio in plan.get("criterios_verificables", []):
+        if criterio.get("medicion") != "hole_count":
+            continue
+        identificador = criterio.get("feature_id") or criterio.get("identificador")
+        features[identificador] = {"estado": "calculated", "cantidad": len(cilindros),
+                                   "diametros_observados_mm": sorted(2 * c["radio_mm"] for c in cilindros),
+                                   "algoritmo": "Conteo de cilindros B-Rep deduplicados"}
+    return features
+
+
+def _comparar_superficies(forma, referencia, malla_a, malla_b) -> dict:
+    resultado = comparar(forma, referencia, malla_a, malla_b)
+    puntos_a = muestrear_superficie(malla_a, PUNTOS_CHAMFER, SEMILLA_CHAMFER)
+    puntos_b = muestrear_superficie(malla_b, PUNTOS_CHAMFER, SEMILLA_CHAMFER)
+    cercanos_b, _ = cKDTree(puntos_b).query(puntos_a, k=1)
+    cercanos_a, _ = cKDTree(puntos_a).query(puntos_b, k=1)
+    hausdorff = {f"p{percentil}": float(max(np.percentile(cercanos_b, percentil),
+                                             np.percentile(cercanos_a, percentil)))
+                 for percentil in (95, 99)}
+    hausdorff["maximo"] = float(max(cercanos_b.max(), cercanos_a.max()))
+    centroides = np.asarray(forma.Center().toTuple()) - np.asarray(referencia.Center().toTuple())
+    area_referencia = float(referencia.Area())
+    caja_a, caja_b = forma.BoundingBox(), referencia.BoundingBox()
+    dimensiones_a = np.asarray([caja_a.xlen, caja_a.ylen, caja_a.zlen], dtype=float)
+    dimensiones_b = np.asarray([caja_b.xlen, caja_b.ylen, caja_b.zlen], dtype=float)
+    # Muestras estables en vértices; la métrica se etiqueta como aproximación por vértices.
+    indices_vertices_a = np.linspace(0, len(malla_a.vertices) - 1,
+                                     min(PUNTOS_CHAMFER, len(malla_a.vertices)), dtype=np.int64)
+    indices_vertices_b = np.linspace(0, len(malla_b.vertices) - 1,
+                                     min(PUNTOS_CHAMFER, len(malla_b.vertices)), dtype=np.int64)
+    puntos_vertices_a = malla_a.vertices[indices_vertices_a]
+    puntos_vertices_b = malla_b.vertices[indices_vertices_b]
+    normales_a = malla_a.vertex_normals[indices_vertices_a]
+    normales_b = malla_b.vertex_normals[indices_vertices_b]
+    _, cercanos_ab = cKDTree(puntos_vertices_b).query(puntos_vertices_a, k=1)
+    _, cercanos_ba = cKDTree(puntos_vertices_a).query(puntos_vertices_b, k=1)
+    acuerdo_ab = np.sum(normales_a * normales_b[cercanos_ab], axis=1)
+    acuerdo_ba = np.sum(normales_b * normales_a[cercanos_ba], axis=1)
+    normal_consistency = float((np.maximum(0, acuerdo_ab).mean() + np.maximum(0, acuerdo_ba).mean()) / 2)
+    diferencias_caja = {e: abs(float(a) - float(b)) for e, a, b in zip("xyz", dimensiones_a, dimensiones_b)}
+    diferencias_caja = {e: 0.0 if valor < 1e-9 else valor for e, valor in diferencias_caja.items()}
+    error_centroide = float(np.linalg.norm(centroides))
+    if error_centroide < 1e-9:
+        error_centroide = 0.0
+    resultado.update({
+        "bounding_box_error_mm": diferencias_caja,
+        "centroid_error_mm": error_centroide,
+        "surface_area_error_relative": abs(float(forma.Area()) - area_referencia) / area_referencia
+        if area_referencia else None,
+        "hausdorff_robusto_mm": hausdorff,
+        "normal_consistency": normal_consistency,
+        "silhouette_iou": comparar_siluetas(malla_a, malla_b),
+        "perfil_calidad": {"semilla": SEMILLA_CHAMFER, "puntos_superficie": PUNTOS_CHAMFER,
+                           "normal_consistency": "dot normal orientada de vértices más cercanos; remuestreo por índice uniforme",
+                           "version": "ciel-quality-metrics-v1"},
+    })
+    return resultado
+
+
+def _simetrias(plan: dict, malla) -> dict:
+    declaradas = plan.get("simetrias", [])
+    if not declaradas:
+        return {"estado": "not_applicable", "valor": None, "unidad": "ratio",
+                "algoritmo": "El GeometricPlan no declara simetría objetivo"}
+    origen = np.asarray((plan.get("sistema_coordenadas") or {}).get("origen", (0, 0, 0)), dtype=float)
+    puntos = np.asarray(malla.vertices, dtype=float)
+    if len(puntos) > PUNTOS_CHAMFER:
+        puntos = puntos[np.linspace(0, len(puntos) - 1, PUNTOS_CHAMFER, dtype=np.int64)]
+    diagon = max(float(np.linalg.norm(malla.extents)), 1e-9)
+    resultados = []
+    for declaracion in declaradas:
+        eje = str(declaracion.get("eje", "")).casefold()
+        if eje not in {"x", "y", "z"}:
+            resultados.append({"estado": "unsupported", "eje": eje})
+            continue
+        reflejados = puntos.copy()
+        indice = "xyz".index(eje)
+        reflejados[:, indice] = 2 * origen[indice] - reflejados[:, indice]
+        distancias = cKDTree(puntos).query(reflejados, k=1)[0]
+        resultados.append({"estado": "calculated", "eje": eje,
+                           "error_p95_mm": float(np.percentile(distancias, 95)),
+                           "error_p99_mm": float(np.percentile(distancias, 99)),
+                           "score": max(0.0, 1.0 - float(np.percentile(distancias, 95)) / diagon),
+                           "algoritmo": "Distancia del vecino más cercano tras reflexión; STL de detalle-v2"})
+    disponibles = [r["score"] for r in resultados if r.get("estado") == "calculated"]
+    return {"estado": "calculated" if disponibles else "not_available",
+            "valor": float(np.mean(disponibles)) if disponibles else None,
+            "por_eje": resultados, "unidad": "ratio", "muestras": len(puntos),
+            "semilla": None, "perfil": "ciel-quality-metrics-v1"}
+
+
 @aplicacion.get("/salud")
 def salud() -> dict:
     return {"estado": "disponible"}
+
+
+@aplicacion.post("/inspeccionar-calidad")
+def inspeccionar_calidad(solicitud: SolicitudInspeccionCalidad) -> dict:
+    """Mide el CAD candidato y crea evidencia multivista; no entrega STEP al proveedor IA."""
+    if not {"pieza.step", "pieza.stl"}.issubset(solicitud.archivos):
+        raise HTTPException(422, "La inspección requiere STEP y STL")
+    try:
+        with tempfile.TemporaryDirectory(prefix="ciel-calidad-") as directorio:
+            ruta_step = Path(directorio) / "pieza.step"
+            ruta_stl = Path(directorio) / "pieza.stl"
+            for nombre, ruta in (("pieza.step", ruta_step), ("pieza.stl", ruta_stl)):
+                contenido = base64.b64decode(solicitud.archivos[nombre], validate=True)
+                if not contenido or len(contenido) > 20_000_000:
+                    raise ValueError(f"{nombre} vacío o supera 20 MB")
+                ruta.write_bytes(contenido)
+            forma = leer_forma(ruta_step)
+            malla = leer_malla(ruta_stl)
+            if not np.isfinite(malla.vertices).all():
+                raise ValueError("STL contiene coordenadas no finitas")
+            topologia = analizar_malla(ruta_stl)
+            geometria = _cajas(forma)
+            geometria.update({"technical_success": True,
+                              "watertight": topologia["watertight"],
+                              "dang_el": topologia["dang_el"],
+                              "componentes_malla": topologia["componentes"],
+                              "stl_sha256": topologia["sha256"],
+                              "step_sha256": hashlib.sha256(ruta_step.read_bytes()).hexdigest()})
+            cilindros = _cilindros(forma)
+            geometria["features"] = _verificar_agujeros(solicitud.plan_geometrico, cilindros)
+            geometria["cylinders_detected"] = len(cilindros)
+            geometria["symmetry"] = _simetrias(solicitud.plan_geometrico, malla)
+            lamina, perfil_render = renderizar_lamina(malla)
+            comparacion_referencia = {
+                "estado": "not_available", "motivo": "No se autorizó una referencia para este protocolo"
+            }
+            if solicitud.usar_referencia and os.environ.get("QUALITY_ALLOW_REFERENCE_METRICS") == "1":
+                if not solicitud.caso_identificador:
+                    comparacion_referencia = {"estado": "not_available", "motivo": "No hay caso asociado"}
+                else:
+                    ruta_ref = ruta_referencia(solicitud.caso_identificador)
+                    referencia = leer_forma(ruta_ref)
+                    ruta_ref_malla = Path(directorio) / "referencia.stl"
+                    cq.exporters.export(referencia, str(ruta_ref_malla), exportType="STL",
+                                        tolerance=0.1, angularTolerance=0.1)
+                    malla_ref = leer_malla(ruta_ref_malla)
+                    comparacion_referencia = _comparar_superficies(forma, referencia, malla, malla_ref)
+                    comparacion_referencia["referencia_sha256"] = hashlib.sha256(ruta_ref.read_bytes()).hexdigest()
+                    comparacion_referencia["protocolo"] = "quality-v1-reference-authorized"
+            elif solicitud.usar_referencia:
+                comparacion_referencia = {
+                    "estado": "not_available",
+                    "motivo": "La referencia está deshabilitada en QUALITY_ALLOW_REFERENCE_METRICS",
+                }
+            return {
+                "technical_success": True,
+                "geometric_metrics": geometria,
+                "reference_metrics": comparacion_referencia,
+                "multiview_png_base64": base64.b64encode(lamina).decode("ascii"),
+                "multiview_profile": perfil_render,
+            }
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise HTTPException(422, f"No se pudo inspeccionar el CAD: {type(error).__name__}") from None
 
 
 @aplicacion.post("/verificar-exportacion")

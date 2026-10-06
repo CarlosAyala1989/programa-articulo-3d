@@ -40,6 +40,7 @@ class Ejecucion(BaseDeclarativa):
     repeticion: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     orden_campana: Mapped[int | None] = mapped_column(Integer, nullable=True)
     maximo_intentos: Mapped[int] = mapped_column(Integer, nullable=False, default=5)
+    configuracion_calidad: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     primer_exito_ejecucion: Mapped[int | None] = mapped_column(Integer, nullable=True)
     primer_exito_cad: Mapped[int | None] = mapped_column(Integer, nullable=True)
     primer_exito_exportacion: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -105,6 +106,27 @@ class ArchivoGenerado(BaseDeclarativa):
         ForeignKey("intentos_generacion.identificador"), nullable=True
     )
     ejecucion: Mapped[Ejecucion] = relationship(back_populates="archivos")
+
+
+class InformeCalidad(BaseDeclarativa):
+    """Evidencia de cada candidato del protocolo Quality Loop, sin alterar métricas históricas."""
+
+    __tablename__ = "informes_calidad"
+
+    identificador: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ejecucion_identificador: Mapped[str] = mapped_column(
+        ForeignKey("ejecuciones.identificador", ondelete="CASCADE"), nullable=False
+    )
+    intento_identificador: Mapped[int] = mapped_column(
+        ForeignKey("intentos_generacion.identificador", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    iteracion: Mapped[int] = mapped_column(Integer, nullable=False)
+    candidate_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    parent_candidate_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    resultado: Mapped[dict] = mapped_column(JSON, nullable=False)
+    fecha_creacion: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=fecha_actual, nullable=False
+    )
 
 
 class VersionConjunto(BaseDeclarativa):
@@ -244,6 +266,7 @@ def crear_tablas() -> None:
             "repeticion INTEGER NOT NULL DEFAULT 1",
             "orden_campana INTEGER",
             "maximo_intentos INTEGER NOT NULL DEFAULT 5",
+            "configuracion_calidad JSON",
             "primer_exito_ejecucion INTEGER",
             "primer_exito_cad INTEGER",
             "primer_exito_exportacion INTEGER",

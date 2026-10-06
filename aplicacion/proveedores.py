@@ -4,12 +4,18 @@ import os
 
 import httpx
 
-from aplicacion.configuracion import MAXIMO_TOKENS_SALIDA, MODELOS_DISPONIBLES, MODELOS_LOCALES, URL_OLLAMA, perfil_generacion
+from aplicacion.configuracion import (
+    MAXIMO_TOKENS_SALIDA, MODELOS_DISPONIBLES, MODELOS_LOCALES, MODELOS_NVIDIA_REGISTRADOS,
+    NVIDIA_MODEL_GENERATOR, URL_OLLAMA, perfil_generacion,
+)
 from aplicacion.proveedor_deepseek import ErrorProveedor, solicitar_codigo as solicitar_deepseek
+from aplicacion.calidad.nvidia import ErrorNvidia, ProveedorNvidia
 
 
 def modelos_configurados() -> dict:
     resultado = dict(MODELOS_DISPONIBLES)
+    if os.environ.get("NVIDIA_API_KEY", "").strip() and NVIDIA_MODEL_GENERATOR in MODELOS_NVIDIA_REGISTRADOS:
+        resultado[NVIDIA_MODEL_GENERATOR] = "NVIDIA NIM · " + NVIDIA_MODEL_GENERATOR
     for codigo, perfil in MODELOS_LOCALES.items():
         if os.environ.get(perfil["variable"], "").strip():
             resultado[codigo] = f'{perfil["nombre"]} — {perfil["cuantizacion"]} (Ollama)'
@@ -52,6 +58,21 @@ def solicitar_codigo(
         respuesta["proveedor"] = "deepseek"
         respuesta["perfil"] = {"modelo": modelo, **perfil}
         return respuesta
+    if modelo in MODELOS_NVIDIA_REGISTRADOS:
+        try:
+            respuesta = ProveedorNvidia().generar(
+                modelo, mensajes, maximo_tokens=perfil["max_tokens"],
+                temperatura=perfil["temperature"],
+            )
+        except ErrorNvidia as error:
+            raise ErrorProveedor(str(error)) from None
+        return {
+            "texto": respuesta.texto, "modelo_informado": respuesta.modelo,
+            "tokens_entrada": respuesta.tokens_entrada, "tokens_salida": respuesta.tokens_salida,
+            "finalizacion": respuesta.finalizacion, "proveedor": respuesta.proveedor,
+            "perfil": {"modelo": modelo, **perfil, "latencia_segundos": respuesta.latencia_segundos,
+                       "request_id": respuesta.request_id},
+        }
     if modelo not in MODELOS_LOCALES:
         raise ErrorProveedor("El modelo solicitado no está habilitado")
     identidad = verificar_modelo_local(modelo)

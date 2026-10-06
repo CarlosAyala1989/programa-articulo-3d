@@ -87,6 +87,29 @@ class EsfuerzoDeepSeek(unittest.TestCase):
         self.assertLess(costo_maximo_planificacion("deepseek-flash", 131072),
                         costo_maximo_planificacion("deepseek-flash"))
 
+    def test_campana_v5_no_se_reinterpreta_bajo_plantilla_v6(self):
+        with self.sesiones() as sesion:
+            sesion.add(VersionConjunto(identificador="conjunto-v5", nombre="Prueba v5", version="1",
+                finalidad="evaluacion", estado="congelado", huella_sha256="b" * 64))
+            sesion.add(Campana(identificador="campana-v5", conjunto_identificador="conjunto-v5",
+                nombre="Campaña histórica", semilla=1, presupuesto_usd=None,
+                configuracion={"plantilla": "v5-formas-organicas-avanzadas"}))
+            sesion.add(Ejecucion(identificador="ejecucion-v5", descripcion="Bloque de prueba",
+                motor="cadquery", modelo="deepseek-flash", modo="open-loop",
+                campana_identificador="campana-v5", estado="pendiente"))
+            sesion.commit()
+        with patch("aplicacion.generacion.crear_sesion", self.sesiones), patch(
+            "aplicacion.generacion.solicitar_codigo"
+        ) as proveedor:
+            procesar_ejecucion("ejecucion-v5")
+        proveedor.assert_not_called()
+        with self.sesiones() as sesion:
+            campana = sesion.get(Campana, "campana-v5")
+            ejecucion = sesion.get(Ejecucion, "ejecucion-v5")
+            self.assertEqual(campana.estado, "bloqueada")
+            self.assertEqual(ejecucion.estado, "bloqueada")
+            self.assertIn("nueva", campana.mensaje)
+
     def test_respuesta_extensa_se_guarda_completa(self):
         with self.sesiones() as sesion:
             sesion.add(Ejecucion(identificador="respuesta-extensa", descripcion="Pieza curva",

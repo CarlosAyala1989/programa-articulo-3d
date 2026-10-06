@@ -9,6 +9,7 @@
 - **Generar piezas** con CadQuery, build123d o FreeCAD Python API y descargar STEP y STL; FreeCAD también entrega FCStd.
 - **Elegir IA:** DeepSeek Flash o Pro mediante API, con esfuerzo bajo, alto o máximo. También hay perfiles Ollama para Qwen 3.5 (0,8B y 2B), Gemma 3 4B, Ministral 3 3B y SmolLM3 3B; se habilitan al configurar sus etiquetas y el trabajador verifica disponibilidad y cuantización antes de ejecutarlos.
 - **Corregir errores:** en *closed-loop* se envían a la IA el programa anterior y los diagnósticos, hasta cinco intentos en total. *Open-loop* realiza uno. La ejecución termina cuando obtiene CAD válido y exportable.
+- **Quality Loop experimental:** plan geométrico validado, revisión estática con Laguna, ejecución CAD aislada, medición determinista y revisiones geométrica y multivista; repara hasta tres ciclos. NVIDIA NIM asigna un modelo a cada rol y conserva separados el éxito técnico y la aceptación de calidad. Best-of-N genera y compara hasta tres candidatos cuando se activa.
 - **Inspeccionar resultados:** visor 3D giratorio, historial de intentos, diagnósticos, archivos y trazas.
 - **Comparar experimentos:** 60 prompts congelados —20 básicos, 20 intermedios y 20 complejos—, campañas con ambos modos y los tres motores, métricas digitales y exportaciones CSV/JSON. Las comparaciones IoU y Chamfer requieren una referencia STEP independiente.
 
@@ -37,14 +38,25 @@ flowchart LR
     API --> Q[(Redis)]
     Q --> W[Trabajador Celery]
     W --> IA[DeepSeek u Ollama]
+    W --> PL[Planner Nemotron]
+    W --> CR[Code Reviewer Laguna]
     W --> S[Supervisor CAD]
     S --> CAD[CadQuery / build123d / FreeCAD]
     CAD --> V[(STEP, STL y trazas)]
     W --> E[Evaluador digital]
+    E --> MV[Render multivista y métricas]
+    MV --> VR[Revisor visual Kimi]
+    MV --> JC[Juez geométrico GLM]
+    VR --> G[Quality Gate]
+    JC --> G
+    G -->|reparar| W
     E --> DB
+    G --> DB
 ```
 
-El código se reparte entre `aplicacion/` (API, generación, campañas y métricas), `interfaz/src/` (páginas y visor), `motores/` y `supervisor/` (ejecución CAD), `evaluador/` (análisis geométrico), `datos/` (conjunto versionado) y `pruebas/` (pruebas y fixtures). PostgreSQL, Redis y los artefactos usan volúmenes de Docker.
+El código se reparte entre `aplicacion/` (API, generación, campañas y métricas), `aplicacion/calidad/` (plan geométrico, routing NIM, prompts por rol y Quality Gate), `interfaz/src/` (páginas y visor), `motores/` y `supervisor/` (ejecución CAD), `evaluador/` (análisis geométrico y renders reproducibles), `datos/` (conjunto versionado) y `pruebas/` (pruebas y fixtures). PostgreSQL, Redis y los artefactos usan volúmenes de Docker.
+
+Quality Loop requiere `NVIDIA_API_KEY` en un archivo de entorno externo; no bloquea el arranque si falta y el resto de modos sigue disponible. Puede añadirse, por ejemplo, `NVIDIA_API_KEY=...` a `/tmp/agente-ciel.env`, proteger el archivo con `chmod 600` y recrear API y trabajador. La clave solo llega a esos servicios. La revisión de referencias se mantiene apagada salvo que se active explícitamente `QUALITY_ALLOW_REFERENCE_METRICS=1`; ese protocolo debe informarse por separado.
 
 ## Pruebas y desarrollo
 

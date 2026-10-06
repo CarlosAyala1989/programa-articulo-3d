@@ -30,7 +30,24 @@ IMPORTACIONES_PERMITIDAS = {
     "build123d": {"build123d", "math"},
     "freecad": {"FreeCAD", "Part", "PartDesign", "Sketcher", "math"},
 }
-FUNCIONES_PROHIBIDAS = {"open", "eval", "exec", "compile", "__import__", "input", "breakpoint"}
+MODULOS_OCP_PERMITIDOS = {"cadquery", "build123d"}
+SIMBOLOS_OCP_PERMITIDOS = {
+    "OCP.gp": {"gp_Pnt", "gp_Vec", "gp_Dir", "gp_Ax1", "gp_Pln", "gp_Trsf"},
+    "OCP.GeomAPI": {"GeomAPI_PointsToBSpline", "GeomAPI_PointsToBSplineSurface"},
+    "OCP.Geom": {"Geom_BSplineCurve", "Geom_BSplineSurface"},
+    "OCP.BRepBuilderAPI": {"BRepBuilderAPI_MakeEdge", "BRepBuilderAPI_MakeWire",
+                            "BRepBuilderAPI_MakeFace", "BRepBuilderAPI_MakeVertex",
+                            "BRepBuilderAPI_MakeSolid", "BRepBuilderAPI_Transform"},
+    "OCP.BRepPrimAPI": {"BRepPrimAPI_MakePrism", "BRepPrimAPI_MakeRevol",
+                         "BRepPrimAPI_MakeCylinder", "BRepPrimAPI_MakeSphere"},
+    "OCP.BRepAlgoAPI": {"BRepAlgoAPI_Fuse", "BRepAlgoAPI_Cut", "BRepAlgoAPI_Common"},
+    "OCP.BRepCheck": {"BRepCheck_Analyzer"},
+    "OCP.TColgp": {"TColgp_Array1OfPnt", "TColgp_Array1OfPnt2d"},
+}
+FUNCIONES_PROHIBIDAS = {
+    "open", "eval", "exec", "compile", "__import__", "input", "breakpoint",
+    "getattr", "setattr", "delattr", "vars", "globals", "locals", "dir",
+}
 ARCHIVOS_PERMITIDOS = {"pieza.stl", "pieza.step", "pieza.FCStd"}
 
 
@@ -47,10 +64,18 @@ def revisar_codigo(codigo: str, motor: str) -> None:
     for nodo in ast.walk(arbol):
         if isinstance(nodo, ast.Import):
             for nombre in nodo.names:
+                if nombre.name.split(".")[0] == "OCP":
+                    raise ValueError("OCP requiere importaciones from-module restringidas")
                 if nombre.name.split(".")[0] not in permitidas:
                     raise ValueError(f"Importación no permitida: {nombre.name}")
         elif isinstance(nodo, ast.ImportFrom):
-            if not nodo.module or nodo.module.split(".")[0] not in permitidas:
+            if nodo.module and nodo.module.startswith("OCP."):
+                if motor not in MODULOS_OCP_PERMITIDOS or nodo.module not in SIMBOLOS_OCP_PERMITIDOS:
+                    raise ValueError(f"Módulo OCP no permitido: {nodo.module}")
+                simbolos = {alias.name for alias in nodo.names}
+                if simbolos - SIMBOLOS_OCP_PERMITIDOS[nodo.module]:
+                    raise ValueError(f"Símbolo OCP no permitido: {sorted(simbolos - SIMBOLOS_OCP_PERMITIDOS[nodo.module])[0]}")
+            elif not nodo.module or nodo.module.split(".")[0] not in permitidas:
                 raise ValueError(f"Importación no permitida: {nodo.module}")
         elif isinstance(nodo, ast.Call) and isinstance(nodo.func, ast.Name):
             if nodo.func.id in FUNCIONES_PROHIBIDAS:
@@ -169,6 +194,12 @@ def _bloqueo_campana(sesion, ejecucion: Ejecucion) -> str | None:
 
 
 def procesar_ejecucion(identificador: str) -> None:
+    with crear_sesion() as sesion:
+        modo = sesion.scalar(select(Ejecucion.modo).where(Ejecucion.identificador == identificador))
+    if modo == "quality-loop":
+        from aplicacion.calidad.flujo import procesar_quality_loop
+        procesar_quality_loop(identificador)
+        return
     with crear_sesion() as sesion:
         ejecucion = sesion.scalar(select(Ejecucion).where(
             Ejecucion.identificador == identificador
