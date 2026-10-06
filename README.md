@@ -56,6 +56,8 @@ flowchart LR
 
 El código se reparte entre `aplicacion/` (API, generación, campañas y métricas), `aplicacion/calidad/` (plan geométrico, routing NIM, prompts por rol y Quality Gate), `interfaz/src/` (páginas y visor), `motores/` y `supervisor/` (ejecución CAD), `evaluador/` (análisis geométrico y renders reproducibles), `datos/` (conjunto versionado) y `pruebas/` (pruebas y fixtures). PostgreSQL, Redis y los artefactos usan volúmenes de Docker.
 
+La [auditoría del prompt maestro](AUDITORIA_PROMPT_MAESTRO.md) relaciona cada requisito con su hito, evidencia y límites pendientes.
+
 Quality Loop requiere `NVIDIA_API_KEY` en un archivo de entorno externo; no bloquea el arranque si falta y el resto de modos sigue disponible. Puede añadirse, por ejemplo, `NVIDIA_API_KEY=...` a `/tmp/agente-ciel.env`, proteger el archivo con `chmod 600` y recrear API y trabajador. La clave solo llega a esos servicios. La revisión de referencias se mantiene apagada salvo que se active explícitamente `QUALITY_ALLOW_REFERENCE_METRICS=1`; ese protocolo debe informarse por separado.
 
 ## Pruebas y desarrollo

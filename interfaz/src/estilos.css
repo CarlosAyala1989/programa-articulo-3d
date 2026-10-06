@@ -207,6 +207,9 @@ select { width: 100%; min-height: 42px; padding: 0 10px; font-size: 12px; }
 .detalle pre { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--texto); background: var(--campo); border: 1px solid var(--linea); padding: 13px; border-radius: 6px; max-height: 250px; overflow: auto; font: 11px/1.6 ui-monospace, 'SFMono-Regular', Consolas, monospace; }
 .detalle > small { color: var(--tenue); font-size: 11px; }
 .informe-calidad h4 { margin: 16px 0 8px; color: var(--secundario); font-size: 11px; text-transform: uppercase; letter-spacing: .6px; }
+.informe-calidad p, .informe-calidad li { color: var(--texto); }
+.informe-calidad ul { margin: 8px 0; padding-left: 20px; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.lamina-calidad { display: block; width: min(100%, 600px); height: auto; margin: 12px auto; border: 1px solid var(--borde); border-radius: 8px; }
 .metricas-calidad { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin: 10px 0 14px; }
 .metricas-calidad > div { padding: 10px; border: 1px solid var(--linea); border-radius: 7px; background: var(--superficie-suave); }
 .metricas-calidad small, .metricas-calidad strong { display: block; }

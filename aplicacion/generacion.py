@@ -48,6 +48,11 @@ FUNCIONES_PROHIBIDAS = {
     "open", "eval", "exec", "compile", "__import__", "input", "breakpoint",
     "getattr", "setattr", "delattr", "vars", "globals", "locals", "dir",
 }
+ATRIBUTOS_ARCHIVO_PROHIBIDOS = {
+    "open", "read", "read_text", "read_bytes", "write", "write_text", "write_bytes",
+    "importStep", "importStl", "importBrep", "export", "exportStep", "exportStl",
+    "saveAs", "load", "loadMesh", "save", "unlink", "mkdir", "rmdir",
+}
 ARCHIVOS_PERMITIDOS = {"pieza.stl", "pieza.step", "pieza.FCStd"}
 
 
@@ -69,6 +74,8 @@ def revisar_codigo(codigo: str, motor: str) -> None:
                 if nombre.name.split(".")[0] not in permitidas:
                     raise ValueError(f"Importación no permitida: {nombre.name}")
         elif isinstance(nodo, ast.ImportFrom):
+            if nodo.level:
+                raise ValueError("Las importaciones relativas no están permitidas")
             if nodo.module and nodo.module.startswith("OCP."):
                 if motor not in MODULOS_OCP_PERMITIDOS or nodo.module not in SIMBOLOS_OCP_PERMITIDOS:
                     raise ValueError(f"Módulo OCP no permitido: {nodo.module}")
@@ -80,8 +87,11 @@ def revisar_codigo(codigo: str, motor: str) -> None:
         elif isinstance(nodo, ast.Call) and isinstance(nodo.func, ast.Name):
             if nodo.func.id in FUNCIONES_PROHIBIDAS:
                 raise ValueError(f"Función no permitida: {nodo.func.id}")
-        elif isinstance(nodo, ast.Attribute) and nodo.attr.startswith("__"):
-            raise ValueError("No se permiten atributos especiales")
+        elif isinstance(nodo, ast.Attribute):
+            if nodo.attr.startswith("__"):
+                raise ValueError("No se permiten atributos especiales")
+            if nodo.attr in ATRIBUTOS_ARCHIVO_PROHIBIDOS:
+                raise ValueError(f"Acceso a archivo no permitido: {nodo.attr}")
         elif isinstance(nodo, ast.Name) and nodo.id in {"__builtins__", "__import__"}:
             raise ValueError("No se permiten nombres internos")
 

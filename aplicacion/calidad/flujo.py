@@ -34,17 +34,28 @@ from aplicacion.configuracion import (
 )
 from aplicacion.costos import costo_estimado
 from aplicacion.generacion import extraer_codigo, guardar_archivos, revisar_codigo, solicitar_ejecucion_cad
-from aplicacion.prompts_sistema import instrucciones_sistema
 from aplicacion.proveedor_deepseek import ErrorProveedor
 from aplicacion.proveedores import solicitar_codigo
 
 
-VERSION_PROTOCOLO = "ciel-quality-loop-v1"
+VERSION_PROTOCOLO = "ciel-quality-loop-v2"
 NOMBRES_ARCHIVOS_CAD = {"pieza.stl", "pieza.step", "pieza.FCStd"}
 
 
 class ErrorLlamadas(Exception):
     """El límite explícito de uso impidió iniciar otra llamada de modelo."""
+
+
+def _clasificar_fallo_proveedor(error: Exception) -> str:
+    codigo = getattr(error, "codigo", None)
+    if codigo in {"provider_error", "timeout", "malformed_response"}:
+        return codigo
+    descripcion = str(error).casefold()
+    if "tiempo de espera" in descripcion or "timeout" in descripcion:
+        return "timeout"
+    if "formato" in descripcion or "malformad" in descripcion:
+        return "malformed_response"
+    return "provider_error"
 
 
 def _json(modelo) -> dict:
@@ -128,14 +139,15 @@ def _persistir_informe(sesion, ejecucion_id: str, intento_id: int, iteracion: in
 
 def _registrar_fallo_proveedor(ejecucion_id: str, intento_id: int, rol: str,
                                error: Exception, informe: dict | None = None) -> None:
-    detalle = {"estado": "provider_error", "rol": rol,
+    clasificacion = _clasificar_fallo_proveedor(error)
+    detalle = {"estado": clasificacion, "rol": rol,
                "error": str(error)[:1000], "tipo_error": type(error).__name__}
     with crear_sesion() as sesion:
         intento = sesion.get(IntentoGeneracion, intento_id)
         ejecucion = sesion.get(Ejecucion, ejecucion_id)
         if intento:
             intento.estado = "error_proveedor"
-            intento.fase_error = "proveedor_ia"
+            intento.fase_error = clasificacion
             intento.diagnostico = f"Fallo del proveedor durante {rol}: {type(error).__name__}"
         if informe is not None and intento:
             informe["provider_error"] = detalle
@@ -146,7 +158,7 @@ def _registrar_fallo_proveedor(ejecucion_id: str, intento_id: int, rol: str,
         ejecucion.mensaje = f"Quality Loop detenido por fallo de infraestructura del rol {rol}"
         ejecucion.fecha_fin = fecha_actual()
         configuracion = dict(ejecucion.configuracion_calidad or {})
-        configuracion["estado_protocolo"] = "provider_error"
+        configuracion["estado_protocolo"] = clasificacion
         configuracion["error_proveedor"] = detalle
         ejecucion.configuracion_calidad = configuracion
         sesion.commit()
@@ -179,7 +191,14 @@ def _mensajes_modelador(descripcion: str, plan: dict, motor: str, historial: dic
     plan_objeto = PlanGeometrico.model_validate(plan)
     contrato = texto_recipes(plan_objeto, motor)
     instruccion = instruccion_modeler(plan_objeto.clase_modelado, CONTRATOS_MOTOR[motor], contrato)
-    instruccion += "\n\nCONTRATO DE EXPORTACIÓN DEL RUNTIME ACTUAL\n" + instrucciones_sistema(motor)
+    instruccion += (
+        "\n\nCONTRATO DE EJECUCIÓN Y EXPORTACIÓN\n"
+        "Usa solo las importaciones autorizadas por la política AST del motor. "
+        "Asigna a resultado exactamente un sólido B-Rep válido y de volumen positivo. "
+        "No escribas archivos ni exportes STEP/STL: el runtime aislado realiza la exportación. "
+        "Verifica que los relieves unan volumen real y los cortes modifiquen la pieza. "
+        f"El programa no debe exceder {MAXIMO_BYTES_CODIGO} bytes UTF-8."
+    )
     cuerpo = [f"Descripción original del usuario:\n{descripcion}",
               f"GeometricPlan validado (versión {plan_objeto.version_esquema}):\n{json.dumps(plan, ensure_ascii=False)}"]
     if historial:
@@ -302,7 +321,7 @@ def procesar_quality_loop(identificador: str) -> None:
             "llamadas_ia": 0, "estado_protocolo": "planificando",
             "tokens_presupuestados": 0,
             "best_of_n": best_of_n,
-            "protocolo_referencia": "quality-v1-reference-authorized" if QUALITY_ALLOW_REFERENCE_METRICS and caso_id else "no-reference",
+            "protocolo_referencia": "quality-v2-reference-authorized" if QUALITY_ALLOW_REFERENCE_METRICS and caso_id else "no-reference",
             "metricas_permiten_referencia": bool(QUALITY_ALLOW_REFERENCE_METRICS and caso_id),
         })
         ejecucion.configuracion_calidad = configuracion
@@ -344,7 +363,8 @@ def procesar_quality_loop(identificador: str) -> None:
                 ejecucion.mensaje = f"No se pudo obtener un GeometricPlan del proveedor NVIDIA ({type(error).__name__})"
                 ejecucion.fecha_fin = fecha_actual()
                 config = dict(ejecucion.configuracion_calidad or {})
-                config.update({"estado_protocolo": "provider_error", "error_proveedor": str(error)[:1000],
+                config.update({"estado_protocolo": _clasificar_fallo_proveedor(error),
+                               "error_proveedor": str(error)[:1000],
                                "llamadas_ia": max(llamadas, proveedor.llamadas),
                                "tokens_presupuestados": reserva_plan * max(1, proveedor.llamadas)})
                 ejecucion.configuracion_calidad = config
@@ -573,7 +593,7 @@ def procesar_quality_loop(identificador: str) -> None:
                     "code_review": code_review_json, "provider_calls": [llamada_generador]
                         + ([info_revisor] if info_revisor else []),
                     "errores": [], "preserved_features": [], "repair_priority": [],
-                    "reference_protocol": "quality-v1-reference-authorized"
+                    "reference_protocol": "quality-v2-reference-authorized"
                         if QUALITY_ALLOW_REFERENCE_METRICS and caso_id else "no-reference",
                 }
                 resultado_cad = None
@@ -587,6 +607,7 @@ def procesar_quality_loop(identificador: str) -> None:
                     if bloquea:
                         estado_intento = "invalido"
                         fase_error = "revisor_codigo"
+                        candidato["resultado_clasificado"] = "review_rejected"
                         diagnostico = "Laguna rechazó el código antes de ejecutar el runtime CAD"
                         candidato["errores"].append(diagnostico)
                 else:
@@ -753,6 +774,9 @@ def procesar_quality_loop(identificador: str) -> None:
                                             "preserved_features": critica.preservar,
                                             "repair_priority": critica.prioridad_reparacion,
                                         })
+                                        candidato["resultado_clasificado"] = (
+                                            "quality_accepted" if gate["accepted"] else "geometry_rejected"
+                                        )
                                         estado_intento = "correcto" if gate["accepted"] else "invalido"
                                         fase_error = None if gate["accepted"] else "quality_gate"
                                         diagnostico = "" if gate["accepted"] else gate["motivo"]

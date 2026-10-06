@@ -15,6 +15,7 @@ from aplicacion.calidad.modelos import (
 from aplicacion.calidad.prompts import (
     PROMPT_CRITICO, PROMPT_PLANIFICADOR, PROMPT_REVISOR_CODIGO, PROMPT_REVISOR_VISUAL,
 )
+from aplicacion.calidad.recipes import CONTRATOS_MOTOR
 from aplicacion.configuracion import (
     NVIDIA_BASE_URL, NVIDIA_MODEL_CODE_REVIEWER, NVIDIA_MODEL_PLANNER,
     NVIDIA_MODEL_PLANNER_FALLBACK, NVIDIA_MODEL_TEXT_JUDGE, NVIDIA_MODEL_VISUAL_REVIEWER,
@@ -24,6 +25,10 @@ from aplicacion.configuracion import (
 
 class ErrorNvidia(Exception):
     """Error operativo sin datos de autenticación o reintentos implícitos."""
+
+    def __init__(self, mensaje: str, codigo: str = "provider_error"):
+        super().__init__(mensaje)
+        self.codigo = codigo
 
 
 @dataclass
@@ -103,7 +108,7 @@ class ProveedorNvidia:
                     headers={"Authorization": f"Bearer {self._clave}", "Accept": "application/json"},
                 )
         except httpx.ReadTimeout:
-            raise ErrorNvidia("Timeout NVIDIA; revisar la llamada antes de reintentar") from None
+            raise ErrorNvidia("Timeout NVIDIA; revisar la llamada antes de reintentar", "timeout") from None
         except httpx.HTTPError as error:
             raise ErrorNvidia(f"Error de transporte NVIDIA: {type(error).__name__}") from None
         if respuesta.status_code != 200:
@@ -118,7 +123,7 @@ class ProveedorNvidia:
                 raise ValueError("contenido vacío")
             uso = datos.get("usage") or {}
         except (ValueError, KeyError, IndexError, TypeError):
-            raise ErrorNvidia("Respuesta NVIDIA vacía o malformada") from None
+            raise ErrorNvidia("Respuesta NVIDIA vacía o malformada", "malformed_response") from None
         return RespuestaNvidia(
             texto=contenido, modelo=str(datos.get("model") or modelo), proveedor="nvidia_nim",
             tokens_entrada=int(uso.get("prompt_tokens") or uso.get("input_tokens") or 0),
@@ -136,7 +141,7 @@ class ProveedorNvidia:
         try:
             valido = esquema.model_validate(_contenido_json(respuesta.texto))
         except (ValidationError, ErrorNvidia, TypeError):
-            raise ErrorNvidia("Respuesta JSON NVIDIA no cumple el esquema requerido") from None
+            raise ErrorNvidia("Respuesta JSON NVIDIA no cumple el esquema requerido", "malformed_response") from None
         return valido, respuesta
 
     def listar_modelos(self) -> list[dict]:
@@ -176,16 +181,19 @@ class RouterModelos:
                 NVIDIA_MODEL_PLANNER, PROMPT_PLANIFICADOR, solicitud, PlanGeometrico
             )
         except ErrorNvidia as error:
-            # Fallback solo para rechazo explícito del endpoint/modelo, nunca timeout o error de red.
+            # Fallback tras respuesta definitivamente rechazada o malformada;
+            # nunca ante timeout o transporte con facturación incierta.
             if (not permitir_fallback
-                    or not any(codigo in str(error) for codigo in ("HTTP 400", "HTTP 404", "HTTP 422"))):
+                    or not (error.codigo == "malformed_response"
+                        or any(codigo in str(error) for codigo in ("HTTP 400", "HTTP 404", "HTTP 422")))):
                 raise
             return self.proveedor.generar_estructurado(
                 NVIDIA_MODEL_PLANNER_FALLBACK, PROMPT_PLANIFICADOR, solicitud, PlanGeometrico
             )
 
     def revisar_codigo(self, motor: str, plan: PlanGeometrico, codigo: str):
-        solicitud = f"Motor={motor}\nGeometricPlan:\n{plan.model_dump_json()}\nPrograma:\n{codigo}"
+        solicitud = (f"Motor={motor}\nVersión y contrato exacto: {CONTRATOS_MOTOR[motor]}\n"
+                     f"GeometricPlan:\n{plan.model_dump_json()}\nPrograma:\n{codigo}")
         return self.proveedor.generar_estructurado(
             NVIDIA_MODEL_CODE_REVIEWER, PROMPT_REVISOR_CODIGO, solicitud, RevisionCodigo,
             maximo_tokens=4096,
@@ -213,7 +221,7 @@ class RouterModelos:
         try:
             revision = RevisionVisual.model_validate(_contenido_json(respuesta.texto))
         except (ValidationError, ErrorNvidia, TypeError):
-            raise ErrorNvidia("Revisión visual NVIDIA no cumple el esquema requerido") from None
+            raise ErrorNvidia("Revisión visual NVIDIA no cumple el esquema requerido", "malformed_response") from None
         return revision, respuesta
 
 

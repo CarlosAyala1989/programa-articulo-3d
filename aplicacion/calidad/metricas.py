@@ -3,7 +3,7 @@
 import math
 
 
-VERSION_METRICAS = "ciel-quality-metrics-v1"
+VERSION_METRICAS = "ciel-quality-metrics-v2"
 UMBRAL_ACEPTACION = 0.85
 PESOS = {
     "MECHANICAL_PRECISE": {"dimensional": 0.32, "topological": 0.12, "features": 0.24,
@@ -94,13 +94,24 @@ def puntaje_features(plan, features_observadas: dict, revision_visual=None) -> d
                                   if n.casefold() in {"count", "cantidad", "number"}), 1.0)
         datos = features_observadas.get(feature.feature_id)
         if not datos or datos.get("estado") != "calculated":
-            detalles.append({"feature_id": feature.feature_id, "estado": "not_available"})
+            detalles.append({"feature_id": feature.feature_id,
+                             "estado": (datos or {}).get("estado", "not_available"),
+                             "verification_status": (datos or {}).get(
+                                 "verification_status", "not_available")})
             continue
         observado = float(datos.get("cantidad", 0))
         count_matches = observado >= cantidad_esperada
         diameter_observed = datos.get("diametro_mm")
-        diameter_matches = (dimension is None or (diameter_observed is not None
-            and abs(float(diameter_observed) - dimension[0]) <= dimension[1]))
+        diametros_observados = datos.get("diametros_observados_mm")
+        if diametros_observados is None:
+            diametros_observados = ([diameter_observed] * int(observado)
+                                    if diameter_observed is not None else [])
+        diameter_matches = (dimension is None or (
+            len(diametros_observados) >= cantidad_esperada and all(
+                abs(float(diametro) - dimension[0]) <= dimension[1]
+                for diametro in diametros_observados
+            )
+        ))
         coincide = count_matches and diameter_matches
         evaluadas += 1
         presentes += int(coincide)
@@ -108,16 +119,28 @@ def puntaje_features(plan, features_observadas: dict, revision_visual=None) -> d
                          "cantidad_esperada": cantidad_esperada, "cantidad_observada": observado,
                          "diametro_esperado_mm": dimension[0] if dimension else None,
                          "diametro_observado_mm": diameter_observed,
+                         "diametros_observados_mm": diametros_observados,
                          "tolerancia_diametro_mm": dimension[1] if dimension else None,
                          "estado": "present" if coincide else "missing",
+                         "verification_status": "calculated",
                          "metodo": datos.get("algoritmo", "")})
+    for feature in declaradas:
+        if feature not in agujeros:
+            datos = features_observadas.get(feature.feature_id) or {}
+            detalles.append({"feature_id": feature.feature_id,
+                             "estado": datos.get("estado", "unsupported"),
+                             "verification_status": datos.get("verification_status", "unsupported"),
+                             "metodo": "revisión visual semántica" if revision_visual is not None else None})
     for criterio in criterios:
         if criterio.medicion not in {"hole_count", "hole_diameter"}:
             continue
         clave = criterio.feature_id or criterio.identificador
         datos = features_observadas.get(clave)
         if not datos or datos.get("estado") != "calculated":
-            detalles.append({"feature_id": clave, "estado": "not_available"})
+            detalles.append({"feature_id": clave,
+                             "estado": (datos or {}).get("estado", "not_available"),
+                             "verification_status": (datos or {}).get(
+                                 "verification_status", "not_available")})
             continue
         esperado = float(criterio.esperado or 0)
         observado = float(datos.get("cantidad" if criterio.medicion == "hole_count" else "diametro_mm", 0) or 0)
@@ -127,7 +150,8 @@ def puntaje_features(plan, features_observadas: dict, revision_visual=None) -> d
         presentes += int(coincide)
         exigidas.add(clave)
         detalles.append({"feature_id": clave, "esperado": esperado, "observado": observado,
-                         "tolerancia": tolerancia, "estado": "present" if coincide else "missing"})
+                         "tolerancia": tolerancia, "estado": "present" if coincide else "missing",
+                         "verification_status": "calculated"})
     total = max(len(exigidas), evaluadas)
     if not total:
         return registro("not_applicable", algoritmo="El plan no declara features esenciales")
@@ -332,6 +356,17 @@ def evaluar_quality_gate(metricas: dict, tecnica_correcta: bool,
     esenciales_faltantes = [clave for clave, dato in puntuaciones.items()
                             if dato.get("requerida_para_aceptacion")
                             and dato.get("estado") in {"not_available", "unsupported"}]
+    features_medidas_incorrectas = [detalle.get("feature_id") for detalle in
+        (puntuaciones.get("features", {}).get("valor") or {}).get("detalle", [])
+        if detalle.get("verification_status") == "calculated" and detalle.get("estado") == "missing"]
+    cotas_explicitas_incorrectas = [eje for eje, detalle in
+        (puntuaciones.get("dimensional", {}).get("valor") or {}).get("por_eje", {}).items()
+        if detalle.get("procedencia") == "specified"
+        and detalle.get("error_absoluto", 0) > detalle.get("tolerancia", 0)]
+    centroide = puntuaciones.get("centroid", {})
+    centroide_incorrecto = bool(centroide.get("estado") == "calculated"
+        and centroide.get("requerida_para_aceptacion")
+        and (centroide.get("valor") or {}).get("error_mm", 0) > centroide.get("tolerancia", 0))
     severidad_bloqueante = any(i.severidad in {"high", "critical"} for i in revision_codigo.issues)
     error_critico = any(error.severidad == "critical" for error in revision_visual.errores + critica.errores)
     aceptado = bool(
@@ -339,6 +374,8 @@ def evaluar_quality_gate(metricas: dict, tecnica_correcta: bool,
         and puntuaciones["topological"]["valor"] == 1.0
         and revision_codigo.accepted and not severidad_bloqueante
         and revision_visual.accepted and critica.accepted and not error_critico
+        and not features_medidas_incorrectas and not cotas_explicitas_incorrectas
+        and not centroide_incorrecto
         and not esenciales_faltantes and puntuacion is not None
         and puntuacion >= UMBRAL_ACEPTACION
     )
@@ -347,6 +384,9 @@ def evaluar_quality_gate(metricas: dict, tecnica_correcta: bool,
         "quality_success": aceptado, "quality_score": round(puntuacion, 6) if puntuacion is not None else None,
         "threshold": UMBRAL_ACEPTACION, "formula_version": VERSION_METRICAS,
         "subscores": calculadas, "evidence_missing": esenciales_faltantes,
+        "features_esenciales_incorrectas": sorted(set(features_medidas_incorrectas)),
+        "cotas_explicitas_incorrectas": cotas_explicitas_incorrectas,
+        "centroide_explicito_incorrecto": centroide_incorrecto,
         "motivo": "aceptado" if aceptado else "quality gate rechazó o evidencia insuficiente",
         "code_review_accepted": revision_codigo.accepted,
         "visual_review_accepted": revision_visual.accepted,

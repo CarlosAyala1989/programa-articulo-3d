@@ -23,6 +23,14 @@ RAIZ = Path("/datos")
 IDENTIFICADOR = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 PUNTOS_CHAMFER = 8192
 SEMILLA_CHAMFER = 20261004
+VERSION_METRICAS_CALIDAD = "ciel-quality-metrics-v2"
+
+
+def metadatos_metrica(unidad: str, algoritmo: str, muestras: int | None = None,
+                      semilla: int | None = None, tolerancia: float | None = None) -> dict:
+    return {"unidad": unidad, "algoritmo": algoritmo, "numero_muestras": muestras,
+            "semilla": semilla, "tolerancia": tolerancia,
+            "perfil": VERSION_METRICAS_CALIDAD, "version": VERSION_METRICAS_CALIDAD}
 
 
 class SolicitudAnalisis(BaseModel):
@@ -149,6 +157,14 @@ def _cajas(forma) -> dict:
         "centroide_mm": [float(centro.x), float(centro.y), float(centro.z)],
         "volumen_mm3": float(forma.Volume()), "area_mm2": float(forma.Area()),
         "solidos": len(forma.Solids()), "brep_valido": bool(forma.isValid()),
+        "metadatos": {
+            "bounding_box_mm": metadatos_metrica("mm", "OCP B-Rep BoundingBox"),
+            "centroide_mm": metadatos_metrica("mm", "OCP B-Rep Center"),
+            "volumen_mm3": metadatos_metrica("mm3", "OCP B-Rep Volume"),
+            "area_mm2": metadatos_metrica("mm2", "OCP B-Rep Area"),
+            "solidos": metadatos_metrica("count", "OCP B-Rep Solids"),
+            "brep_valido": metadatos_metrica("boolean", "OCP B-Rep isValid"),
+        },
     }
 
 
@@ -162,6 +178,16 @@ def _cilindros(forma) -> list[dict]:
         cilindro = BRepAdaptor_Surface(cara.wrapped).Cylinder()
         eje = cilindro.Axis().Direction()
         origen = cilindro.Axis().Location()
+        punto = cara.positionAt(0.3, 0.5)
+        normal = cara.normalAt(0.3, 0.5)[0]
+        direccion = np.asarray([eje.X(), eje.Y(), eje.Z()], dtype=float)
+        desplazamiento = np.asarray([punto.x - origen.X(), punto.y - origen.Y(),
+                                     punto.z - origen.Z()], dtype=float)
+        radial = desplazamiento - np.dot(desplazamiento, direccion) * direccion
+        # La normal exterior del sólido apunta hacia el eje en una pared de agujero.
+        # Una superficie cilíndrica exterior apunta fuera y no es un agujero.
+        if np.dot(radial, [normal.x, normal.y, normal.z]) >= -0.5 * cilindro.Radius():
+            continue
         datos = {"radio_mm": float(cilindro.Radius()),
                  "eje": [float(eje.X()), float(eje.Y()), float(eje.Z())],
                  "origen_eje_mm": [float(origen.X()), float(origen.Y()), float(origen.Z())]}
@@ -202,9 +228,6 @@ def _verificar_agujeros(plan: dict, cilindros: list[dict]) -> dict:
         posicion_esperada = [posicion.get(eje, {}).get("valor") for eje in ("x", "y", "z")]
         candidatos = []
         for cilindro in cilindros:
-            tolerancia = float(dimension.get("tolerancia") or 0.15) if dimension else 0.15
-            if esperado is not None and abs(2 * cilindro["radio_mm"] - esperado) > tolerancia:
-                continue
             if eje_esperado and isinstance(eje_esperado, (list, tuple)) and len(eje_esperado) == 3:
                 alineacion = abs(float(np.dot(cilindro["eje"], np.asarray(eje_esperado, dtype=float))))
                 if alineacion < 0.98:
@@ -215,22 +238,56 @@ def _verificar_agujeros(plan: dict, cilindros: list[dict]) -> dict:
                 if np.linalg.norm(delta - np.dot(delta, eje) * eje) > 0.5:
                     continue
             candidatos.append(cilindro)
-        features[feature_id] = {"estado": "calculated", "cantidad": len(candidatos),
+        features[feature_id] = {"estado": "calculated", "verification_status": "calculated",
+                                "cantidad": len(candidatos),
                                 "cantidad_esperada": cantidad_esperada,
+                                "diametro_esperado_mm": esperado,
                                 "diametro_mm": 2 * candidatos[0]["radio_mm"] if candidatos else None,
+                                "diametros_observados_mm": sorted(2 * c["radio_mm"] for c in candidatos),
                                 "cilindros_verificados": candidatos,
-                                "algoritmo": "OCP BRepAdaptor_Surface CYLINDER; agrupación por radio y eje"}
+                                "algoritmo": "OCP BRepAdaptor_Surface CYLINDER; normal interior, agrupación por radio y eje",
+                                "unidad": "mm", "numero_muestras": len(cilindros),
+                                "semilla": None, "tolerancia": 0.15,
+                                "perfil": "ciel-quality-metrics-v2", "version": "ciel-quality-metrics-v2"}
+    for feature in plan.get("features", []):
+        identificador = feature.get("feature_id")
+        if isinstance(identificador, str) and identificador not in features:
+            features[identificador] = {
+                "estado": "unsupported", "verification_status": "unsupported",
+                "motivo": "No existe una medición B-Rep fiable para este tipo de feature",
+                "algoritmo": "sin medición determinista", "unidad": "unitless",
+                "numero_muestras": None, "semilla": None, "tolerancia": None,
+                "perfil": "ciel-quality-metrics-v2", "version": "ciel-quality-metrics-v2",
+            }
     for criterio in plan.get("criterios_verificables", []):
-        if criterio.get("medicion") != "hole_count":
+        if criterio.get("medicion") not in {"hole_count", "hole_diameter"}:
             continue
         identificador = criterio.get("feature_id") or criterio.get("identificador")
-        features[identificador] = {"estado": "calculated", "cantidad": len(cilindros),
+        if identificador in features and features[identificador]["estado"] == "calculated":
+            continue
+        diametros = sorted(2 * c["radio_mm"] for c in cilindros)
+        if criterio.get("medicion") == "hole_diameter" and len({round(d, 3) for d in diametros}) != 1:
+            features[identificador] = {"estado": "unsupported", "verification_status": "unsupported",
+                "motivo": "No hay un diámetro único atribuible al criterio global",
+                "algoritmo": "OCP; diámetro de cilindros interiores", "unidad": "mm",
+                "numero_muestras": len(cilindros), "semilla": None,
+                "tolerancia": criterio.get("tolerancia"),
+                "perfil": "ciel-quality-metrics-v2", "version": "ciel-quality-metrics-v2"}
+            continue
+        features[identificador] = {"estado": "calculated", "verification_status": "calculated",
+                                   "cantidad": len(cilindros),
+                                   "diametro_mm": diametros[0] if diametros else None,
                                    "diametros_observados_mm": sorted(2 * c["radio_mm"] for c in cilindros),
-                                   "algoritmo": "Conteo de cilindros B-Rep deduplicados"}
+                                   "algoritmo": "Conteo de cilindros interiores B-Rep deduplicados",
+                                   "unidad": "mm" if criterio.get("medicion") == "hole_diameter" else "unitless",
+                                   "numero_muestras": len(cilindros),
+                                   "semilla": None, "tolerancia": criterio.get("tolerancia"),
+                                   "perfil": "ciel-quality-metrics-v2", "version": "ciel-quality-metrics-v2"}
     return features
 
 
-def _comparar_superficies(forma, referencia, malla_a, malla_b) -> dict:
+def _comparar_superficies(forma, referencia, malla_a, malla_b,
+                         orientacion_frente: str = "+Y") -> dict:
     resultado = comparar(forma, referencia, malla_a, malla_b)
     puntos_a = muestrear_superficie(malla_a, PUNTOS_CHAMFER, SEMILLA_CHAMFER)
     puntos_b = muestrear_superficie(malla_b, PUNTOS_CHAMFER, SEMILLA_CHAMFER)
@@ -271,11 +328,25 @@ def _comparar_superficies(forma, referencia, malla_a, malla_b) -> dict:
         if area_referencia else None,
         "hausdorff_robusto_mm": hausdorff,
         "normal_consistency": normal_consistency,
-        "silhouette_iou": comparar_siluetas(malla_a, malla_b),
+        "silhouette_iou": comparar_siluetas(malla_a, malla_b, orientacion_frente),
         "perfil_calidad": {"semilla": SEMILLA_CHAMFER, "puntos_superficie": PUNTOS_CHAMFER,
                            "normal_consistency": "dot normal orientada de vértices más cercanos; remuestreo por índice uniforme",
-                           "version": "ciel-quality-metrics-v1"},
+                           "version": "ciel-quality-metrics-v2"},
     })
+    resultado["metadatos"] = {
+        "iou_brep": metadatos_metrica("ratio", "Intersección / unión booleana B-Rep"),
+        "chamfer_digital_mm2": metadatos_metrica("mm2", "Chamfer cuadrático bidireccional",
+                                                 PUNTOS_CHAMFER, SEMILLA_CHAMFER),
+        "diferencia_volumen_mm3": metadatos_metrica("mm3", "Diferencia de volumen B-Rep"),
+        "bounding_box_error_mm": metadatos_metrica("mm", "Diferencia absoluta de cajas B-Rep por eje"),
+        "centroid_error_mm": metadatos_metrica("mm", "Distancia euclídea de centroides B-Rep"),
+        "surface_area_error_relative": metadatos_metrica("ratio", "Diferencia relativa de área B-Rep"),
+        "hausdorff_robusto_mm": metadatos_metrica("mm", "P95/P99/máximo bidireccional de muestras STL",
+                                                   PUNTOS_CHAMFER, SEMILLA_CHAMFER),
+        "normal_consistency": metadatos_metrica("ratio", "Producto escalar de normales de vértices próximos",
+                                                 min(len(indices_vertices_a), len(indices_vertices_b))),
+        "silhouette_iou": metadatos_metrica("ratio", "IoU raster ortográfico de cuatro vistas", 4),
+    }
     return resultado
 
 
@@ -308,7 +379,8 @@ def _simetrias(plan: dict, malla) -> dict:
     return {"estado": "calculated" if disponibles else "not_available",
             "valor": float(np.mean(disponibles)) if disponibles else None,
             "por_eje": resultados, "unidad": "ratio", "muestras": len(puntos),
-            "semilla": None, "perfil": "ciel-quality-metrics-v1"}
+            "semilla": None, "perfil": "ciel-quality-metrics-v2",
+            "version": VERSION_METRICAS_CALIDAD, "tolerancia": None}
 
 
 @aplicacion.get("/salud")
@@ -342,11 +414,19 @@ def inspeccionar_calidad(solicitud: SolicitudInspeccionCalidad) -> dict:
                               "componentes_malla": topologia["componentes"],
                               "stl_sha256": topologia["sha256"],
                               "step_sha256": hashlib.sha256(ruta_step.read_bytes()).hexdigest()})
+            geometria["metadatos"].update({
+                "watertight": metadatos_metrica("boolean", "trimesh is_watertight"),
+                "dang_el": metadatos_metrica("count", "Aristas STL con incidencia distinta de dos"),
+                "componentes_malla": metadatos_metrica("count", "trimesh split"),
+            })
             cilindros = _cilindros(forma)
             geometria["features"] = _verificar_agujeros(solicitud.plan_geometrico, cilindros)
             geometria["cylinders_detected"] = len(cilindros)
             geometria["symmetry"] = _simetrias(solicitud.plan_geometrico, malla)
-            lamina, perfil_render = renderizar_lamina(malla)
+            orientacion_frente = (solicitud.plan_geometrico.get("sistema_coordenadas") or {}).get(
+                "orientacion_frente", "+Y"
+            )
+            lamina, perfil_render = renderizar_lamina(malla, orientacion_frente)
             comparacion_referencia = {
                 "estado": "not_available", "motivo": "No se autorizó una referencia para este protocolo"
             }
@@ -360,9 +440,11 @@ def inspeccionar_calidad(solicitud: SolicitudInspeccionCalidad) -> dict:
                     cq.exporters.export(referencia, str(ruta_ref_malla), exportType="STL",
                                         tolerance=0.1, angularTolerance=0.1)
                     malla_ref = leer_malla(ruta_ref_malla)
-                    comparacion_referencia = _comparar_superficies(forma, referencia, malla, malla_ref)
+                    comparacion_referencia = _comparar_superficies(
+                        forma, referencia, malla, malla_ref, orientacion_frente
+                    )
                     comparacion_referencia["referencia_sha256"] = hashlib.sha256(ruta_ref.read_bytes()).hexdigest()
-                    comparacion_referencia["protocolo"] = "quality-v1-reference-authorized"
+                    comparacion_referencia["protocolo"] = "quality-v2-reference-authorized"
             elif solicitud.usar_referencia:
                 comparacion_referencia = {
                     "estado": "not_available",

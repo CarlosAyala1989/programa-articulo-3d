@@ -57,7 +57,7 @@ class SistemaCoordenadas(ModeloEstricto):
     eje_x: tuple[float, float, float] = (1.0, 0.0, 0.0)
     eje_y: tuple[float, float, float] = (0.0, 1.0, 0.0)
     eje_z: tuple[float, float, float] = (0.0, 0.0, 1.0)
-    orientacion_frente: str = "+Y"
+    orientacion_frente: Literal["+X", "-X", "+Y", "-Y", "+Z", "-Z"] = "+Y"
 
 
 class FeaturePlan(ModeloEstricto):

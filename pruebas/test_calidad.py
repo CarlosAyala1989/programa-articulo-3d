@@ -21,8 +21,8 @@ from aplicacion.calidad.modelos import (
     FeaturePlan, PlanGeometrico, RevisionCodigo, RevisionVisual, VectorPlan,
 )
 from aplicacion.calidad.nvidia import ErrorNvidia, ProveedorNvidia, RouterModelos
-from aplicacion.calidad.prompts import validar_plan_para_descripcion
-from aplicacion.calidad.recipes import seleccionar_recipes
+from aplicacion.calidad.prompts import instruccion_modeler, validar_plan_para_descripcion
+from aplicacion.calidad.recipes import seleccionar_recipes, texto_recipes
 from aplicacion.generacion import revisar_codigo
 
 
@@ -88,6 +88,31 @@ class GeometricPlanTests(unittest.TestCase):
             FeaturePlan(feature_id="relieve", nombre="relieve", tipo="organic relief")])
         ids_organicos = {r.identificador for r in seleccionar_recipes(organico, "build123d")}
         self.assertIn("organic_relief", ids_organicos)
+        organico_sin_loft = PlanGeometrico(clase_modelado="ORGANIC_FREEFORM", features=[
+            FeaturePlan(feature_id="cuerpo", nombre="cuerpo", tipo="volumen orgánico")])
+        ids_sin_loft = {r.identificador for r in seleccionar_recipes(organico_sin_loft, "cadquery")}
+        self.assertNotIn("loft", ids_sin_loft)
+        self.assertNotIn("asymmetric_loft", ids_sin_loft)
+
+    def test_perfiles_mecanico_organico_e_hibrido_son_distintos(self):
+        perfiles = {clase: instruccion_modeler(clase, "contrato") for clase in (
+            "MECHANICAL_PRECISE", "ORGANIC_FREEFORM", "HYBRID")}
+        self.assertEqual(len(set(perfiles.values())), 3)
+        self.assertIn("cotas exactas", perfiles["MECHANICAL_PRECISE"])
+        self.assertIn("secciones asimétricas", perfiles["ORGANIC_FREEFORM"])
+        self.assertIn("separa regiones mecánicas", perfiles["HYBRID"])
+
+    def test_quality_mode_no_inyecta_loft_en_placa_mecanica(self):
+        plan = plan_mecanico()
+        plan.operaciones = ["extrude"]
+        mensajes, _ = flujo._mensajes_modelador(
+            "Placa de 100 x 60 x 10 mm", plan.model_dump(mode="json"), "cadquery", None, 1
+        )
+        sistema = mensajes[0]["content"].casefold()
+        self.assertIn("workplane.extrude", sistema)
+        self.assertNotIn("patrón mínimo verificado de loft", sistema)
+        self.assertNotIn(".loft(", sistema)
+        self.assertIn("extrusion", texto_recipes(plan, "cadquery"))
 
     def test_candidatos_best_of_n_comparten_plan_y_no_reciben_referencias(self):
         plan = plan_mecanico().model_dump(mode="json")
@@ -113,6 +138,19 @@ class GeometricPlanTests(unittest.TestCase):
 
 
 class RouterModelTests(unittest.TestCase):
+    def test_laguna_recibe_version_exacta_del_motor(self):
+        capturado = {}
+
+        class ProveedorFalso:
+            def generar_estructurado(self, modelo, sistema, solicitud, esquema, **kwargs):
+                capturado["solicitud"] = solicitud
+                return RevisionCodigo(accepted=True, severity="none"), respuesta()
+
+        RouterModelos(ProveedorFalso()).revisar_codigo(
+            "build123d", plan_mecanico(), "from build123d import Box\nresultado = Box(1, 1, 1)"
+        )
+        self.assertIn("build123d 0.13.0", capturado["solicitud"])
+
     def test_planificador_usa_fallback_solo_tras_rechazo_http_explicito(self):
         class ProveedorFalso:
             def __init__(self):
@@ -144,8 +182,36 @@ class RouterModelTests(unittest.TestCase):
             RouterModelos(proveedor).planificar("Placa de 100 x 60 x 10 mm")
         self.assertEqual(proveedor.llamadas, 1)
 
+    def test_planificador_usa_super_tras_json_invalido_completado(self):
+        class ProveedorFalso:
+            def __init__(self):
+                self.modelos = []
+
+            def generar_estructurado(self, modelo, sistema, solicitud, esquema, **kwargs):
+                self.modelos.append(modelo)
+                if len(self.modelos) == 1:
+                    raise ErrorNvidia("Respuesta JSON NVIDIA no cumple el esquema requerido",
+                                      "malformed_response")
+                return plan_mecanico(), respuesta("{}", modelo)
+
+        proveedor = ProveedorFalso()
+        plan, respuesta_plan = RouterModelos(proveedor).planificar(
+            "Placa de 100 x 60 x 10 mm", permitir_fallback=True
+        )
+        self.assertEqual(plan.clase_modelado, "MECHANICAL_PRECISE")
+        self.assertEqual(respuesta_plan.modelo, proveedor.modelos[1])
+        self.assertNotEqual(proveedor.modelos[0], proveedor.modelos[1])
+
 
 class NvidiaProviderTests(unittest.TestCase):
+    def test_fallos_de_infraestructura_tienen_categoria_distinta(self):
+        self.assertEqual(flujo._clasificar_fallo_proveedor(
+            ErrorNvidia("Timeout NVIDIA", "timeout")), "timeout")
+        self.assertEqual(flujo._clasificar_fallo_proveedor(
+            ErrorNvidia("JSON inválido", "malformed_response")), "malformed_response")
+        self.assertEqual(flujo._clasificar_fallo_proveedor(
+            ErrorNvidia("HTTP 503")), "provider_error")
+
     def test_nvidia_es_opcional_y_no_desactiva_los_modos_historicos(self):
         with patch.dict(os.environ, {"NVIDIA_API_KEY": ""}):
             opciones = consultar_opciones()
@@ -186,6 +252,26 @@ class NvidiaProviderTests(unittest.TestCase):
 
 
 class QualityGateTests(unittest.TestCase):
+    def test_fallo_tecnico_nunca_pasa_quality_gate(self):
+        visual = RevisionVisual(accepted=True, puntuacion_silueta=1,
+            puntuacion_proporciones=1, puntuacion_features=1)
+        metricas = preparar_metricas(plan_mecanico(), {"technical_success": False}, visual)
+        resultado = evaluar_quality_gate(metricas, False,
+            RevisionCodigo(accepted=True, severity="none"), visual,
+            CriticaGeometrica(accepted=True))
+        self.assertFalse(resultado["technical_success"])
+        self.assertFalse(resultado["quality_success"])
+
+    def test_feature_no_medible_se_marca_unsupported_sin_inventar_medida(self):
+        plan = PlanGeometrico(clase_modelado="ORGANIC_FREEFORM", features=[
+            FeaturePlan(feature_id="pliegue", nombre="pliegue asimétrico", tipo="organic relief")
+        ])
+        metricas = preparar_metricas(plan, {"features": {"pliegue": {
+            "estado": "unsupported", "verification_status": "unsupported"}}})
+        detalle = metricas["puntuaciones"]["features"]["valor"]["detalle"][0]
+        self.assertEqual(detalle["verification_status"], "unsupported")
+        self.assertNotIn("observado", detalle)
+
     def test_pieza_tecnica_y_geometricamente_correcta_se_acepta(self):
         plan = plan_mecanico()
         visual = RevisionVisual(accepted=True, puntuacion_silueta=0.98,
@@ -224,6 +310,39 @@ class QualityGateTests(unittest.TestCase):
         self.assertTrue(gate["technical_success"])
         self.assertFalse(gate["quality_success"])
         self.assertLess(metricas["puntuaciones"]["features"]["valor"]["score"], 1)
+
+    def test_gate_rechaza_agujeros_faltantes_aunque_revisores_aprueben(self):
+        plan = plan_mecanico()
+        plan.features[0].esencial = False
+        plan.features.append(FeaturePlan(feature_id="agujeros", nombre="cuatro agujeros",
+            tipo="hole pattern", dimensiones={"count": dimension(4), "diameter": dimension(8)}))
+        visual = RevisionVisual(accepted=True, puntuacion_silueta=1,
+            puntuacion_proporciones=1, puntuacion_features=1)
+        observadas = {"technical_success": True, "brep_valido": True, "solidos": 1,
+            "watertight": True, "dang_el": 0,
+            "bounding_box_mm": {"x": 100, "y": 60, "z": 10},
+            "features": {"agujeros": {"estado": "calculated", "cantidad": 2,
+                "diametro_mm": 8, "diametros_observados_mm": [8, 8]}}}
+        metricas = preparar_metricas(plan, observadas, visual)
+        gate = evaluar_quality_gate(metricas, True,
+            RevisionCodigo(accepted=True, severity="none"), visual,
+            CriticaGeometrica(accepted=True))
+        self.assertFalse(gate["quality_success"])
+        self.assertEqual(gate["features_esenciales_incorrectas"], ["agujeros"])
+
+    def test_gate_rechaza_cota_explicita_fuera_de_tolerancia(self):
+        plan = plan_mecanico()
+        visual = RevisionVisual(accepted=True, puntuacion_silueta=1,
+            puntuacion_proporciones=1, puntuacion_features=1)
+        observadas = {"technical_success": True, "brep_valido": True, "solidos": 1,
+            "watertight": True, "dang_el": 0,
+            "bounding_box_mm": {"x": 102, "y": 60, "z": 10}}
+        metricas = preparar_metricas(plan, observadas, visual)
+        gate = evaluar_quality_gate(metricas, True,
+            RevisionCodigo(accepted=True, severity="none"), visual,
+            CriticaGeometrica(accepted=True))
+        self.assertFalse(gate["quality_success"])
+        self.assertEqual(gate["cotas_explicitas_incorrectas"], ["x"])
 
     def test_feature_de_agujero_compara_diametro_y_cantidad_en_sus_unidades(self):
         plan = plan_mecanico()
@@ -282,6 +401,58 @@ class QualityGateTests(unittest.TestCase):
 
 
 class QualityLoopIntegrationTests(unittest.TestCase):
+    def test_quality_loop_agota_tres_ciclos_si_laguna_rechaza_cada_candidato(self):
+        motor_db = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+        BaseDeclarativa.metadata.create_all(motor_db)
+        Sesiones = sessionmaker(bind=motor_db, expire_on_commit=False)
+        ejecucion_id = "d1111111-1111-4111-8111-111111111111"
+        with Sesiones() as sesion:
+            sesion.add(Ejecucion(identificador=ejecucion_id,
+                descripcion="Placa de 100 x 60 x 10 mm", motor="cadquery", modelo="deepseek-v4-pro",
+                modo="quality-loop", maximo_intentos=3, estado="pendiente", mensaje="En cola",
+                configuracion_calidad={"best_of_n": False}))
+            sesion.commit()
+
+        proveedor_fake = SimpleNamespace(llamadas=0)
+
+        class RouterFalso:
+            def __init__(self, proveedor):
+                self.proveedor = proveedor
+
+            def planificar(self, descripcion, permitir_fallback=True):
+                self.proveedor.llamadas += 1
+                return plan_mecanico(), respuesta(modelo="nvidia/nemotron-3-ultra-550b-a55b")
+
+            def revisar_codigo(self, motor, plan, codigo):
+                self.proveedor.llamadas += 1
+                return (RevisionCodigo(accepted=False, severity="critical"),
+                        respuesta(modelo="poolside/laguna-xs-2.1"))
+
+        def generar(modelo, mensajes, esfuerzo, maximo_tokens=None):
+            return {"texto": "import cadquery as cq\nresultado = cq.Workplane('XY').box(100, 60, 10)",
+                    "modelo_informado": modelo, "tokens_entrada": 100, "tokens_salida": 50,
+                    "finalizacion": "stop", "proveedor": "deepseek", "perfil": {"max_tokens": 1000}}
+
+        with tempfile.TemporaryDirectory() as directorio:
+            with patch("aplicacion.calidad.flujo.crear_sesion", Sesiones), \
+                 patch("aplicacion.calidad.flujo.ProveedorNvidia", return_value=proveedor_fake), \
+                 patch("aplicacion.calidad.flujo.RouterModelos", RouterFalso), \
+                 patch("aplicacion.calidad.flujo.solicitar_codigo", side_effect=generar), \
+                 patch("aplicacion.calidad.flujo.solicitar_ejecucion_cad") as runtime, \
+                 patch("aplicacion.calidad.flujo.DIRECTORIO_ARTEFACTOS", directorio):
+                flujo.procesar_quality_loop(ejecucion_id)
+            runtime.assert_not_called()
+        with Sesiones() as sesion:
+            ejecucion = sesion.get(Ejecucion, ejecucion_id)
+            informes = list(sesion.scalars(select(InformeCalidad).where(
+                InformeCalidad.ejecucion_identificador == ejecucion_id)))
+            self.assertEqual(ejecucion.estado, "fallida")
+            self.assertEqual(ejecucion.configuracion_calidad["estado_protocolo"], "quality_rejected")
+            self.assertFalse(ejecucion.configuracion_calidad["quality_success"])
+            self.assertEqual(len(informes), 3)
+            self.assertTrue(all(i.resultado["resultado_clasificado"] == "review_rejected"
+                                for i in informes))
+
     def test_cad_rechazado_se_repara_preservando_features_y_acepta_ganador(self):
         motor_db = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
         BaseDeclarativa.metadata.create_all(motor_db)
@@ -386,6 +557,21 @@ class QualityLoopIntegrationTests(unittest.TestCase):
     def test_politica_estatica_bloquea_importaciones_fuera_de_allowlist(self):
         with self.assertRaisesRegex(ValueError, "Importación no permitida"):
             revisar_codigo("import os", "cadquery")
+        with self.assertRaisesRegex(ValueError, "Acceso a archivo no permitido"):
+            revisar_codigo("import cadquery as cq\nresultado = cq.importers.importStep('/tmp/ref.step')",
+                           "cadquery")
+        with self.assertRaisesRegex(ValueError, "importaciones relativas"):
+            revisar_codigo("from .cadquery import Workplane", "cadquery")
+
+    def test_ocp_restringido_a_simbolos_y_motores_permitidos(self):
+        codigo = "from OCP.gp import gp_Pnt\nimport cadquery as cq\nresultado = cq.Workplane('XY').box(1, 1, 1)"
+        revisar_codigo(codigo, "cadquery")
+        with self.assertRaisesRegex(ValueError, "Módulo OCP no permitido"):
+            revisar_codigo("from OCP.StlAPI import StlAPI_Writer", "cadquery")
+        with self.assertRaisesRegex(ValueError, "Módulo OCP no permitido"):
+            revisar_codigo("from OCP.gp import gp_Pnt", "freecad")
+        with self.assertRaisesRegex(ValueError, "Símbolo OCP no permitido"):
+            revisar_codigo("from OCP.gp import gp_XYZ", "cadquery")
 
 
 if __name__ == "__main__":
