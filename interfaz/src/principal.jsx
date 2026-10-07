@@ -291,7 +291,11 @@ function Aplicacion() {
     }
   }
 
-  const archivoStl = ejecucion?.archivos?.find((archivo) => archivo.nombre === 'pieza.stl');
+  const candidatoSeleccionado = ejecucion?.calidad?.ranking_global?.find((candidato) => candidato.seleccionado_final)?.candidate_id
+    || ejecucion?.informes_calidad?.find((informe) => informe.technical_success)?.candidate_id;
+  const archivoStl = ejecucion?.archivos?.find((archivo) => archivo.nombre === 'pieza.stl')
+    || ejecucion?.archivos?.find((archivo) => candidatoSeleccionado && archivo.nombre === `${candidatoSeleccionado}-pieza.stl`)
+    || (ejecucion?.modo === 'quality-loop' && ejecucion?.archivos?.find((archivo) => archivo.nombre.endsWith('-pieza.stl')));
   const activo = ejecucion && ['pendiente', 'generando'].includes(ejecucion.estado);
   const colorEstado = ejecucion?.estado === 'completada' ? 'exito' : ['fallida', 'bloqueada'].includes(ejecucion?.estado) ? 'fallo' : 'proceso';
 
