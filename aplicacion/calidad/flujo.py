@@ -707,7 +707,8 @@ def procesar_quality_loop(identificador: str) -> None:
                     sesion.commit()
                 _actualizar_mensaje_ejecucion(
                     identificador,
-                    f"Quality Loop: generando intento {contador_intento} de {MAXIMO_ITERACIONES_QUALITY_LOOP}",
+                    f"Quality Loop: ciclo {iteracion}/{MAXIMO_ITERACIONES_QUALITY_LOOP}, "
+                    f"candidato {indice_candidato}/{cantidad_candidatos}",
                 )
                 try:
                     limite_salida = (MAXIMO_TOKENS_SALIDA_QUALITY_GENERADOR
@@ -782,7 +783,9 @@ def procesar_quality_loop(identificador: str) -> None:
                         antes = proveedor.llamadas
                         inicio_revisor = time.monotonic()
                         _actualizar_mensaje_ejecucion(
-                            identificador, f"Revisor de código: esperando respuesta para el intento {contador_intento}"
+                            identificador,
+                            f"Revisor de código: ciclo {iteracion}/{MAXIMO_ITERACIONES_QUALITY_LOOP}, "
+                            f"candidato {indice_candidato}/{cantidad_candidatos}",
                         )
                         try:
                             revision_codigo, respuesta_revisor = router.revisar_codigo(motor, plan, codigo)
@@ -794,6 +797,10 @@ def procesar_quality_loop(identificador: str) -> None:
                             llamada_fallida = _entrada_llamada_fallida(
                                 "code_reviewer", catalogo_roles()["revisor_codigo"]["modelo"], error,
                                 time.monotonic() - inicio_revisor, reserva_revisor, incremento,
+                            )
+                            llamada_fallida["modelos_intentados"] = list(
+                                getattr(router, "modelos_revisor_codigo", [])
+                                or [catalogo_roles()["revisor_codigo"]["modelo"]]
                             )
                             llamadas_registradas.append(llamada_fallida)
                             detalle_error = f"El revisor de código falló ({_clasificar_fallo_proveedor(error)})."
@@ -821,6 +828,10 @@ def procesar_quality_loop(identificador: str) -> None:
                         info_revisor = _entrada_llamada("code_reviewer", respuesta_revisor,
                             respuesta_revisor.modelo, "nvidia_nim")
                         info_revisor["llamadas_http"] = max(1, incremento)
+                        info_revisor["modelos_intentados"] = list(
+                            getattr(router, "modelos_revisor_codigo", [])
+                            or [respuesta_revisor.modelo]
+                        )
                         info_revisor["parametros"] = {"max_tokens": 4096, "temperature": 0}
                         info_revisor, tokens_presupuestados = _reservar_en_llamada(
                             info_revisor, reserva_revisor * max(1, incremento), tokens_presupuestados
@@ -927,7 +938,8 @@ def procesar_quality_loop(identificador: str) -> None:
                                     inicio_revisor = time.monotonic()
                                     _actualizar_mensaje_ejecucion(
                                         identificador,
-                                        f"Revisor visual: esperando respuesta para el intento {contador_intento}",
+                                        f"Revisor visual: ciclo {iteracion}/{MAXIMO_ITERACIONES_QUALITY_LOOP}, "
+                                        f"candidato {indice_candidato}/{cantidad_candidatos}",
                                     )
                                     try:
                                         revision_visual, respuesta_visual = router.revisar_visual(
@@ -1012,7 +1024,9 @@ def procesar_quality_loop(identificador: str) -> None:
                                         inicio_revisor = time.monotonic()
                                         _actualizar_mensaje_ejecucion(
                                             identificador,
-                                            f"Crítico geométrico: esperando respuesta para el intento {contador_intento}",
+                                            f"Crítico geométrico: ciclo {iteracion}/"
+                                            f"{MAXIMO_ITERACIONES_QUALITY_LOOP}, candidato "
+                                            f"{indice_candidato}/{cantidad_candidatos}",
                                         )
                                         try:
                                             critica, respuesta_critica = router.criticar(plan, evidencia_critico)

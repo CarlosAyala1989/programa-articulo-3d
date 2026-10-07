@@ -16,7 +16,7 @@ class ErrorProveedor(Exception):
 
 def solicitar_codigo(
     modelo: str, mensajes: list[dict[str, str]], esfuerzo_razonamiento: str | None = None,
-    maximo_tokens: int | None = None,
+    maximo_tokens: int | None = None, tiempo_espera_segundos: float | None = None,
 ) -> dict:
     if modelo not in MODELOS_DISPONIBLES:
         raise ErrorProveedor("El modelo solicitado no está habilitado")
@@ -31,8 +31,10 @@ def solicitar_codigo(
         **perfil_generacion(modelo, esfuerzo_razonamiento, maximo_tokens),
     }
     encabezados = {"Authorization": f"Bearer {clave}"}
+    tiempo_espera = (TIEMPO_ESPERA_DEEPSEEK_SEGUNDOS if tiempo_espera_segundos is None
+                     else max(1.0, min(1800.0, float(tiempo_espera_segundos))))
     # Los reintentos de transporte nunca se cuentan como otra generación CAD.
-    with httpx.Client(timeout=httpx.Timeout(TIEMPO_ESPERA_DEEPSEEK_SEGUNDOS, connect=12.0)) as cliente:
+    with httpx.Client(timeout=httpx.Timeout(tiempo_espera, connect=12.0)) as cliente:
         for numero_transporte in range(2):
             try:
                 respuesta = cliente.post(

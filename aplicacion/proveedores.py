@@ -5,9 +5,10 @@ import os
 import httpx
 
 from aplicacion.configuracion import (
-    MAXIMO_TOKENS_SALIDA, MODELOS_DISPONIBLES, MODELOS_LOCALES, MODELOS_NVIDIA_GENERADORES,
+    MAXIMO_TOKENS_NVIDIA, MAXIMO_TOKENS_SALIDA, MODELOS_DISPONIBLES, MODELOS_LOCALES,
+    MODELOS_NVIDIA_GENERADORES, MODELOS_RESPALDO_GENERACION_NVIDIA,
     MODELOS_NVIDIA_REGISTRADOS,
-    NVIDIA_MODEL_GENERATOR, URL_OLLAMA, perfil_generacion,
+    NVIDIA_GENERACION_TIMEOUT_SEGUNDOS, NVIDIA_MODEL_GENERATOR, URL_OLLAMA, perfil_generacion,
 )
 from aplicacion.proveedor_deepseek import ErrorProveedor, solicitar_codigo as solicitar_deepseek
 from aplicacion.calidad.nvidia import ErrorNvidia, ProveedorNvidia
@@ -63,13 +64,70 @@ def solicitar_codigo(
         return respuesta
     if modelo in MODELOS_NVIDIA_REGISTRADOS:
         try:
-            respuesta = ProveedorNvidia().generar(
+            respuesta = ProveedorNvidia(timeout=NVIDIA_GENERACION_TIMEOUT_SEGUNDOS).generar(
                 modelo, mensajes, maximo_tokens=perfil["max_tokens"],
                 temperatura=perfil["temperature"],
                 esfuerzo_razonamiento=perfil["reasoning_effort"],
             )
         except ErrorNvidia as error:
-            raise ErrorProveedor(str(error)) from None
+            errores_recuperables = {
+                "timeout", "transport_error", "rate_limited", "service_unavailable", "server_error",
+            }
+            respaldo = MODELOS_RESPALDO_GENERACION_NVIDIA.get(modelo)
+            if error.codigo not in errores_recuperables or not respaldo:
+                raise ErrorProveedor(str(error)) from None
+            try:
+                if respaldo in MODELOS_DISPONIBLES:
+                    esfuerzo_respaldo = "low"
+                    perfil_respaldo = perfil_generacion(
+                        respaldo, esfuerzo_respaldo, MAXIMO_TOKENS_NVIDIA
+                    )
+                    salida = solicitar_deepseek(
+                        respaldo, mensajes, esfuerzo_respaldo, MAXIMO_TOKENS_NVIDIA,
+                        tiempo_espera_segundos=NVIDIA_GENERACION_TIMEOUT_SEGUNDOS,
+                    )
+                    return {
+                        **salida, "proveedor": "deepseek",
+                        "perfil": {
+                            "modelo": respaldo, **perfil_respaldo,
+                            "modelo_solicitado": modelo,
+                            "fallback_automatico": {
+                                "modelo_primario": modelo, "modelo_respaldo": respaldo,
+                                "causa": error.codigo,
+                            },
+                        },
+                    }
+                perfil_respaldo = perfil_generacion(respaldo)
+                salida_respaldo = ProveedorNvidia(
+                    timeout=NVIDIA_GENERACION_TIMEOUT_SEGUNDOS
+                ).generar(
+                    respaldo, mensajes,
+                    maximo_tokens=perfil_respaldo["max_tokens"],
+                    temperatura=perfil_respaldo["temperature"],
+                    esfuerzo_razonamiento=perfil_respaldo["reasoning_effort"],
+                )
+                return {
+                    "texto": salida_respaldo.texto,
+                    "modelo_informado": salida_respaldo.modelo,
+                    "tokens_entrada": salida_respaldo.tokens_entrada,
+                    "tokens_salida": salida_respaldo.tokens_salida,
+                    "finalizacion": salida_respaldo.finalizacion,
+                    "proveedor": salida_respaldo.proveedor,
+                    "perfil": {
+                        "modelo": respaldo, **perfil_respaldo,
+                        "modelo_solicitado": modelo,
+                        "latencia_segundos": salida_respaldo.latencia_segundos,
+                        "request_id": salida_respaldo.request_id,
+                        "fallback_automatico": {
+                            "modelo_primario": modelo, "modelo_respaldo": respaldo,
+                            "causa": error.codigo,
+                        },
+                    },
+                }
+            except (ErrorNvidia, ErrorProveedor) as error_respaldo:
+                raise ErrorProveedor(
+                    f"NVIDIA falló ({error.codigo}) y el respaldo falló ({type(error_respaldo).__name__})"
+                ) from None
         return {
             "texto": respuesta.texto, "modelo_informado": respuesta.modelo,
             "tokens_entrada": respuesta.tokens_entrada, "tokens_salida": respuesta.tokens_salida,

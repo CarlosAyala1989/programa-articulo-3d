@@ -17,7 +17,8 @@ from aplicacion.calidad.prompts import (
 )
 from aplicacion.calidad.recipes import CONTRATOS_MOTOR
 from aplicacion.configuracion import (
-    NVIDIA_BASE_URL, NVIDIA_MODEL_CODE_REVIEWER, NVIDIA_MODEL_PLANNER,
+    NVIDIA_BASE_URL, NVIDIA_MODEL_CODE_REVIEWER, NVIDIA_MODEL_CODE_REVIEWER_FALLBACK,
+    NVIDIA_MODEL_PLANNER,
     NVIDIA_MODEL_PLANNER_FALLBACK, NVIDIA_MODEL_TEXT_JUDGE, NVIDIA_MODEL_VISUAL_REVIEWER,
     MODELO_COSMOS_EXPERIMENTAL, MODELOS_NVIDIA_CATALOGO, MODELOS_NVIDIA_REGISTRADOS,
 )
@@ -70,7 +71,7 @@ def _contenido_json(texto: str) -> dict:
 
 
 class ProveedorNvidia:
-    def __init__(self, clave: str | None = None, base_url: str | None = None, timeout: float = 600):
+    def __init__(self, clave: str | None = None, base_url: str | None = None, timeout: float = 120):
         self._clave = (clave if clave is not None else os.environ.get("NVIDIA_API_KEY", "")).strip()
         self.base_url = (base_url or NVIDIA_BASE_URL).rstrip("/")
         self.timeout = timeout
@@ -113,9 +114,15 @@ class ProveedorNvidia:
         except httpx.ReadTimeout:
             raise ErrorNvidia("Timeout NVIDIA; revisar la llamada antes de reintentar", "timeout") from None
         except httpx.HTTPError as error:
-            raise ErrorNvidia(f"Error de transporte NVIDIA: {type(error).__name__}") from None
+            raise ErrorNvidia(
+                f"Error de transporte NVIDIA: {type(error).__name__}", "transport_error"
+            ) from None
         if respuesta.status_code != 200:
-            raise ErrorNvidia(f"NVIDIA respondió HTTP {respuesta.status_code}")
+            codigo = ("rate_limited" if respuesta.status_code == 429
+                      else "service_unavailable" if respuesta.status_code == 503
+                      else "server_error" if respuesta.status_code >= 500
+                      else f"http_{respuesta.status_code}")
+            raise ErrorNvidia(f"NVIDIA respondió HTTP {respuesta.status_code}", codigo)
         try:
             datos = respuesta.json()
             eleccion = datos["choices"][0]
@@ -210,6 +217,7 @@ class RouterModelos:
     def __init__(self, proveedor: ProveedorNvidia | None = None):
         self.proveedor = proveedor or ProveedorNvidia()
         self.modelos_planificador: list[str] = []
+        self.modelos_revisor_codigo: list[str] = []
 
     @staticmethod
     def _solicitud_plan(descripcion: str) -> str:
@@ -248,10 +256,23 @@ class RouterModelos:
     def revisar_codigo(self, motor: str, plan: PlanGeometrico, codigo: str):
         solicitud = (f"Motor={motor}\nVersión y contrato exacto: {CONTRATOS_MOTOR[motor]}\n"
                      f"GeometricPlan:\n{plan.model_dump_json()}\nPrograma:\n{codigo}")
-        return self.proveedor.generar_estructurado(
-            NVIDIA_MODEL_CODE_REVIEWER, PROMPT_REVISOR_CODIGO, solicitud, RevisionCodigo,
-            maximo_tokens=4096,
-        )
+        self.modelos_revisor_codigo = [NVIDIA_MODEL_CODE_REVIEWER]
+        try:
+            return self.proveedor.generar_estructurado(
+                NVIDIA_MODEL_CODE_REVIEWER, PROMPT_REVISOR_CODIGO, solicitud, RevisionCodigo,
+                maximo_tokens=4096,
+            )
+        except ErrorNvidia as error:
+            # Una respuesta malformada es un rechazo completo, así que permite
+            # probar una alternativa. No repetir ante timeout ni transporte incierto.
+            if (error.codigo != "malformed_response"
+                    or NVIDIA_MODEL_CODE_REVIEWER_FALLBACK == NVIDIA_MODEL_CODE_REVIEWER):
+                raise
+            self.modelos_revisor_codigo.append(NVIDIA_MODEL_CODE_REVIEWER_FALLBACK)
+            return self.proveedor.generar_estructurado(
+                NVIDIA_MODEL_CODE_REVIEWER_FALLBACK, PROMPT_REVISOR_CODIGO,
+                solicitud, RevisionCodigo, maximo_tokens=4096,
+            )
 
     def criticar(self, plan: PlanGeometrico, evidencia: dict):
         solicitud = (f"GeometricPlan:\n{plan.model_dump_json()}\nEvidencia determinista/visual:\n"
@@ -280,7 +301,10 @@ class RouterModelos:
 def catalogo_roles() -> dict:
     return {
         "planificador": {"modelo": NVIDIA_MODEL_PLANNER, "alternativo": NVIDIA_MODEL_PLANNER_FALLBACK},
-        "revisor_codigo": {"modelo": NVIDIA_MODEL_CODE_REVIEWER},
+        "revisor_codigo": {
+            "modelo": NVIDIA_MODEL_CODE_REVIEWER,
+            "alternativo": NVIDIA_MODEL_CODE_REVIEWER_FALLBACK,
+        },
         "revisor_visual": {"modelo": NVIDIA_MODEL_VISUAL_REVIEWER},
         "juez_textual": {"modelo": NVIDIA_MODEL_TEXT_JUDGE},
         "generador": {"modelo": os.environ.get("NVIDIA_MODEL_GENERATOR", "nvidia/nemotron-3-super-120b-a12b")},

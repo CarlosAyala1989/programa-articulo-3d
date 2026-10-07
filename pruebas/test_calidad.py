@@ -28,7 +28,8 @@ from aplicacion.calidad.recipes import seleccionar_recipes, texto_recipes
 from aplicacion.proveedores import solicitar_codigo
 from aplicacion.configuracion import (
     MODELOS_NVIDIA_GENERADORES, NVIDIA_MODEL_CODE_REVIEWER, NVIDIA_MODEL_GENERATOR,
-    NVIDIA_MODEL_PLANNER, NVIDIA_MODEL_PLANNER_FALLBACK, NVIDIA_MODEL_VISUAL_REVIEWER,
+    NVIDIA_MODEL_CODE_REVIEWER_FALLBACK, NVIDIA_MODEL_PLANNER, NVIDIA_MODEL_PLANNER_FALLBACK,
+    NVIDIA_MODEL_VISUAL_REVIEWER,
 )
 from aplicacion.generacion import revisar_codigo
 
@@ -182,6 +183,45 @@ class RouterModelTests(unittest.TestCase):
         self.assertEqual(capturado["modelo"], NVIDIA_MODEL_CODE_REVIEWER)
         self.assertIn("build123d 0.13.0", capturado["solicitud"])
 
+    def test_revisor_usa_glm_si_nemotron_devuelve_respuesta_malformada(self):
+        class ProveedorFalso:
+            def __init__(self):
+                self.modelos = []
+
+            def generar_estructurado(self, modelo, sistema, solicitud, esquema, **kwargs):
+                self.modelos.append(modelo)
+                if len(self.modelos) == 1:
+                    raise ErrorNvidia("JSON inválido", "malformed_response")
+                return RevisionCodigo(accepted=True, severity="none"), respuesta("{}", modelo)
+
+        proveedor = ProveedorFalso()
+        router = RouterModelos(proveedor)
+        revision, respuesta_revisor = router.revisar_codigo(
+            "cadquery", plan_mecanico(), "import cadquery as cq\nresultado = cq.Workplane(\"XY\")"
+        )
+        self.assertEqual(proveedor.modelos, [
+            NVIDIA_MODEL_CODE_REVIEWER, NVIDIA_MODEL_CODE_REVIEWER_FALLBACK,
+        ])
+        self.assertEqual(router.modelos_revisor_codigo, proveedor.modelos)
+        self.assertEqual(respuesta_revisor.modelo, NVIDIA_MODEL_CODE_REVIEWER_FALLBACK)
+        self.assertTrue(revision.accepted)
+
+    def test_revisor_no_intenta_fallback_tras_timeout(self):
+        class ProveedorFalso:
+            def __init__(self):
+                self.llamadas = 0
+
+            def generar_estructurado(self, modelo, sistema, solicitud, esquema, **kwargs):
+                self.llamadas += 1
+                raise ErrorNvidia("Timeout NVIDIA", "timeout")
+
+        proveedor = ProveedorFalso()
+        with self.assertRaisesRegex(ErrorNvidia, "Timeout NVIDIA"):
+            RouterModelos(proveedor).revisar_codigo(
+                "cadquery", plan_mecanico(), "import cadquery as cq\nresultado = cq.Workplane(\"XY\")"
+            )
+        self.assertEqual(proveedor.llamadas, 1)
+
     def test_planificador_usa_fallback_solo_tras_rechazo_http_explicito(self):
         class ProveedorFalso:
             def __init__(self):
@@ -326,6 +366,42 @@ class NvidiaProviderTests(unittest.TestCase):
                 resultado = solicitar_codigo(modelo, [{"role": "user", "content": "Pieza"}])
                 self.assertEqual(proveedor.generar.call_args.kwargs["esfuerzo_razonamiento"], esfuerzo)
                 self.assertEqual(resultado["perfil"]["reasoning_effort"], esfuerzo)
+
+    def test_timeout_kimi_cambia_a_nemotron_y_registra_el_respaldo(self):
+        modelo_primario = "moonshotai/kimi-k3"
+        modelo_respaldo = "nvidia/nemotron-3-super-120b-a12b"
+        mensajes = [{"role": "user", "content": "Genera una casa simple"}]
+        with patch("aplicacion.proveedores.ProveedorNvidia") as constructor:
+            proveedor = constructor.return_value
+            proveedor.generar.side_effect = [
+                ErrorNvidia("Timeout NVIDIA", "timeout"),
+                respuesta("import cadquery as cq", modelo_respaldo),
+            ]
+            resultado = solicitar_codigo(modelo_primario, mensajes)
+        self.assertEqual(proveedor.generar.call_count, 2)
+        self.assertEqual(proveedor.generar.call_args.args[0], modelo_respaldo)
+        self.assertEqual(resultado["modelo_informado"], modelo_respaldo)
+        self.assertEqual(resultado["perfil"]["fallback_automatico"], {
+            "modelo_primario": modelo_primario,
+            "modelo_respaldo": modelo_respaldo,
+            "causa": "timeout",
+        })
+
+    def test_timeout_nemotron_cambia_a_deepseek_pro_con_limite_acotado(self):
+        mensajes = [{"role": "user", "content": "Genera una casa simple"}]
+        with patch("aplicacion.proveedores.ProveedorNvidia") as constructor, patch(
+            "aplicacion.proveedores.solicitar_deepseek", return_value={
+                "texto": "resultado = 1", "modelo_informado": "deepseek-v4-pro",
+                "tokens_entrada": 20, "tokens_salida": 12, "finalizacion": "stop",
+            }
+        ) as respaldo:
+            constructor.return_value.generar.side_effect = ErrorNvidia("Timeout NVIDIA", "timeout")
+            resultado = solicitar_codigo("nvidia/nemotron-3-super-120b-a12b", mensajes)
+        self.assertEqual(respaldo.call_args.args[0], "deepseek-v4-pro")
+        self.assertEqual(respaldo.call_args.args[2], "low")
+        self.assertEqual(respaldo.call_args.args[3], 8192)
+        self.assertEqual(resultado["proveedor"], "deepseek")
+        self.assertEqual(resultado["perfil"]["fallback_automatico"]["causa"], "timeout")
 
     def test_revisor_visual_envia_imagen_y_esquema_estructurado(self):
         proveedor = ProveedorNvidia(clave="clave-prueba-no-real")
