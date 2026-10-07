@@ -7,6 +7,7 @@ import json
 import re
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import httpx
 from sqlalchemy import select
@@ -16,13 +17,15 @@ from aplicacion.base_datos import (
     crear_sesion, fecha_actual,
 )
 from aplicacion.calidad.metricas import evaluar_quality_gate, preparar_metricas
-from aplicacion.calidad.modelos import PlanGeometrico
+from aplicacion.calidad.modelos import PlanGeometrico, RevisionCodigo
 from aplicacion.calidad.nvidia import ErrorNvidia, ProveedorNvidia, RouterModelos, catalogo_roles
 from aplicacion.calidad.prompts import (
     PROMPT_CRITICO, PROMPT_PLANIFICADOR, PROMPT_REPARADOR,
     PROMPT_REVISOR_CODIGO, PROMPT_REVISOR_VISUAL,
     instruccion_modeler, validar_plan_para_descripcion,
 )
+from aplicacion.calidad.planificador_local import construir_plan_local
+from aplicacion.calidad.generador_local import generar_cadquery_de_casa
 from aplicacion.calidad.recipes import texto_recipes
 from aplicacion.calidad.recipes import CONTRATOS_MOTOR
 from aplicacion.configuracion import (
@@ -516,12 +519,39 @@ def procesar_quality_loop(identificador: str) -> None:
                 ejecucion.configuracion_calidad = config
                 sesion.commit()
             return
+        plan_local = False
+        error_plan_local = None
+        inicio_planificador = time.monotonic()
         try:
             plan, respuesta_plan = router.planificar(
                 descripcion, permitir_fallback=permitir_respaldo
             )
             llamadas = proveedor.llamadas
-        except (ErrorNvidia, Exception) as error:
+        except ErrorNvidia as error:
+            # El timeout de un modelo no se reenvía. Un plan local conserva cotas
+            # literales y rasgos nombrados para que el loop aún pueda validar CAD.
+            plan = construir_plan_local(descripcion)
+            validar_plan_para_descripcion(descripcion, plan)
+            respuesta_plan = SimpleNamespace(
+                texto=plan.model_dump_json(), modelo="planificador_local_determinista_v1",
+                proveedor="local_deterministic_fallback", tokens_entrada=0, tokens_salida=0,
+                finalizacion="fallback", latencia_segundos=0.0, request_id=None,
+            )
+            error_plan_local = error
+            plan_local = True
+            llamadas = proveedor.llamadas
+            tokens_presupuestados = reserva_plan * max(1, llamadas)
+            llamada_fallida = _entrada_llamada_fallida(
+                "planner", catalogo_roles()["planificador"]["modelo"], error,
+                time.monotonic() - inicio_planificador, reserva_plan,
+                max(1, proveedor.llamadas),
+            )
+            llamada_fallida["modelos_intentados"] = list(
+                getattr(router, "modelos_planificador", [])
+                or [catalogo_roles()["planificador"]["modelo"]]
+            )
+            llamadas_registradas.append(llamada_fallida)
+        except Exception as error:
             # El detalle seguro del cliente contiene clase/status, nunca headers ni clave.
             with crear_sesion() as sesion:
                 ejecucion = sesion.get(Ejecucion, identificador)
@@ -537,72 +567,101 @@ def procesar_quality_loop(identificador: str) -> None:
                 sesion.commit()
             return
         llamada_plan = _entrada_llamada(
-            "planner", respuesta_plan, getattr(respuesta_plan, "modelo", ""), "nvidia_nim"
+            "planner_local_fallback" if plan_local else "planner", respuesta_plan,
+            getattr(respuesta_plan, "modelo", ""),
+            getattr(respuesta_plan, "proveedor", "nvidia_nim"),
         )
-        llamada_plan["llamadas_http"] = llamadas
-        llamada_plan["modelos_intentados"] = list(
-            getattr(router, "modelos_planificador", []) or [getattr(respuesta_plan, "modelo", "")]
-        )
-        llamada_plan["parametros"] = {"max_tokens": MAXIMO_TOKENS_NVIDIA, "temperature": 0}
-        llamada_plan, tokens_presupuestados = _reservar_en_llamada(
-            llamada_plan, reserva_plan * max(1, llamadas), tokens_presupuestados
-        )
+        if plan_local:
+            llamada_plan.update({
+                "llamadas_http": 0, "tokens_reservados": 0, "tokens_presupuestados": 0,
+                "modelos_intentados": list(getattr(router, "modelos_planificador", [])),
+                "causa_fallback": _clasificar_fallo_proveedor(error_plan_local),
+                "error_proveedor": str(error_plan_local)[:1000],
+            })
+            config = dict(ejecucion.configuracion_calidad or {})
+            config["planner_fallback_local"] = {
+                "modelo": respuesta_plan.modelo,
+                "causa": _clasificar_fallo_proveedor(error_plan_local),
+                "error": str(error_plan_local)[:1000],
+                "modelos_intentados": llamada_plan["modelos_intentados"],
+            }
+            with crear_sesion() as sesion:
+                ejecucion = sesion.get(Ejecucion, identificador)
+                ejecucion.configuracion_calidad = config
+                sesion.commit()
+        else:
+            llamada_plan["llamadas_http"] = llamadas
+            llamada_plan["modelos_intentados"] = list(
+                getattr(router, "modelos_planificador", [])
+                or [getattr(respuesta_plan, "modelo", "")]
+            )
+            llamada_plan["parametros"] = {"max_tokens": MAXIMO_TOKENS_NVIDIA, "temperature": 0}
+            llamada_plan, tokens_presupuestados = _reservar_en_llamada(
+                llamada_plan, reserva_plan * max(1, llamadas), tokens_presupuestados
+            )
         llamadas_registradas.append(llamada_plan)
         respuesta_plan_registrada = llamada_plan
         llamadas_antes_validacion = proveedor.llamadas
         inicio_validacion_plan = time.monotonic()
+        error_plan_local = None
         try:
             plan, respuesta_plan = _validar_plan_con_respaldo(
                 router, descripcion, plan, respuesta_plan, permitir_respaldo
             )
         except ErrorNvidia as error:
+            error_plan_local = error
             llamadas_respaldo = proveedor.llamadas - llamadas_antes_validacion
             if llamadas_respaldo:
                 llamadas_registradas.append(_entrada_llamada_fallida(
                     "planner_fallback", NVIDIA_MODEL_PLANNER_FALLBACK, error,
                     time.monotonic() - inicio_validacion_plan, reserva_plan, llamadas_respaldo,
                 ))
-            with crear_sesion() as sesion:
-                ejecucion = sesion.get(Ejecucion, identificador)
-                ejecucion.estado = "bloqueada"
-                ejecucion.mensaje = "El planificador alternativo no pudo devolver un plan válido"
-                ejecucion.fecha_fin = fecha_actual()
-                config = dict(ejecucion.configuracion_calidad or {})
-                config.update({
-                    "estado_protocolo": _clasificar_fallo_proveedor(error),
-                    "error_proveedor": str(error)[:1000],
-                    "planner_models_attempted": list(getattr(router, "modelos_planificador", [])),
-                    "llamadas_ia": proveedor.llamadas,
-                    "tokens_presupuestados": reserva_plan * max(1, proveedor.llamadas),
-                    "llamadas": list(llamadas_registradas),
-                })
-                ejecucion.configuracion_calidad = config
-                sesion.commit()
-            return
         except ValueError as error:
+            error_plan_local = error
             llamadas_respaldo = proveedor.llamadas - llamadas_antes_validacion
             if llamadas_respaldo:
                 llamadas_registradas.append(_entrada_llamada_fallida(
-                    "planner_fallback", NVIDIA_MODEL_PLANNER_FALLBACK, error,
+                    "planner_fallback_validation", NVIDIA_MODEL_PLANNER_FALLBACK, error,
                     time.monotonic() - inicio_validacion_plan, reserva_plan, llamadas_respaldo,
                 ))
+        if error_plan_local:
+            # Si el plan del modelo no conserva literalmente las cotas, o el
+            # modelo alternativo falla, la descripción aún permite un plan local.
+            plan = construir_plan_local(descripcion)
+            validar_plan_para_descripcion(descripcion, plan)
+            plan_local = True
+            respuesta_plan = SimpleNamespace(
+                texto=plan.model_dump_json(), modelo="planificador_local_determinista_v1",
+                proveedor="local_deterministic_fallback", tokens_entrada=0, tokens_salida=0,
+                finalizacion="fallback", latencia_segundos=0.0, request_id=None,
+            )
+            llamada_plan_local = _entrada_llamada(
+                "planner_local_fallback", respuesta_plan, respuesta_plan.modelo,
+                "local_deterministic_fallback",
+            )
+            llamada_plan_local.update({
+                "llamadas_http": 0, "tokens_reservados": 0, "tokens_presupuestados": 0,
+                "modelos_intentados": list(getattr(router, "modelos_planificador", [])),
+                "causa_fallback": _clasificar_fallo_proveedor(error_plan_local),
+                "error_proveedor": str(error_plan_local)[:1000],
+            })
+            llamadas_registradas.append(llamada_plan_local)
+            respuesta_plan_registrada = llamada_plan_local
+            llamadas = proveedor.llamadas
             with crear_sesion() as sesion:
                 ejecucion = sesion.get(Ejecucion, identificador)
-                ejecucion.estado = "bloqueada"
-                ejecucion.mensaje = "El GeometricPlan no conserva literalmente las cotas especificadas"
-                ejecucion.fecha_fin = fecha_actual()
                 config = dict(ejecucion.configuracion_calidad or {})
-                config.update({"estado_protocolo": "plan_invalid", "planner_model": respuesta_plan.modelo,
-                               "planner_provider": "nvidia_nim", "plan_error": str(error),
-                               "planner_models_attempted": list(getattr(router, "modelos_planificador", [])),
-                               "llamadas_ia": proveedor.llamadas,
-                               "tokens_presupuestados": reserva_plan * max(1, proveedor.llamadas),
-                               "llamadas": list(llamadas_registradas)})
+                config["planner_fallback_local"] = {
+                    "modelo": respuesta_plan.modelo,
+                    "causa": _clasificar_fallo_proveedor(error_plan_local),
+                    "error": str(error_plan_local)[:1000],
+                    "modelos_intentados": llamada_plan_local["modelos_intentados"],
+                }
                 ejecucion.configuracion_calidad = config
                 sesion.commit()
-            return
-        llamadas_respaldo = proveedor.llamadas - llamadas_antes_validacion
-        if llamadas_respaldo:
+        else:
+            llamadas_respaldo = proveedor.llamadas - llamadas_antes_validacion
+        if not error_plan_local and llamadas_respaldo:
             llamada_respaldo = _entrada_llamada(
                 "planner_fallback", respuesta_plan, NVIDIA_MODEL_PLANNER_FALLBACK, "nvidia_nim"
             )
@@ -710,24 +769,72 @@ def procesar_quality_loop(identificador: str) -> None:
                     f"Quality Loop: ciclo {iteracion}/{MAXIMO_ITERACIONES_QUALITY_LOOP}, "
                     f"candidato {indice_candidato}/{cantidad_candidatos}",
                 )
+                llamada_generador_fallida = None
                 try:
                     limite_salida = (MAXIMO_TOKENS_SALIDA_QUALITY_GENERADOR
                                      if modelo in MODELOS_DISPONIBLES else None)
                     respuesta = solicitar_codigo(modelo, mensajes, esfuerzo, limite_salida)
                 except ErrorProveedor as error:
-                    tokens_presupuestados += reserva_generador
+                    codigo_respaldo = None
+                    if motor == "cadquery":
+                        try:
+                            codigo_respaldo = generar_cadquery_de_casa(plan)
+                            ast.parse(codigo_respaldo)
+                            revisar_codigo(codigo_respaldo, motor)
+                        except (SyntaxError, ValueError):
+                            codigo_respaldo = None
+                    if codigo_respaldo is None:
+                        tokens_presupuestados += reserva_generador
+                        with crear_sesion() as sesion:
+                            ejecucion = sesion.get(Ejecucion, identificador)
+                            config = dict(ejecucion.configuracion_calidad or {})
+                            config["tokens_presupuestados"] = tokens_presupuestados
+                            config["llamadas_ia"] = llamadas
+                            ejecucion.configuracion_calidad = config
+                            sesion.commit()
+                        informe = {"iteracion": iteracion, "candidate_id": candidate_id,
+                                   "parent_candidate_id": parent_id}
+                        _registrar_fallo_proveedor(identificador, intento_id, "generador", error, informe)
+                        detener_por_infraestructura = True
+                        break
+
+                    llamadas_modelo = 2 if "respaldo falló" in str(error) else 1
+                    llamadas += max(0, llamadas_modelo - 1)
+                    tokens_presupuestados += reserva_generador * llamadas_modelo
+                    llamada_fallida = _entrada_llamada_fallida(
+                        "generador", modelo, error, time.monotonic() - inicio_ia,
+                        reserva_generador, llamadas_modelo,
+                    )
+                    llamada_fallida["modelos_intentados"] = [modelo]
+                    llamada_generador_fallida = llamada_fallida
+                    llamadas_registradas.append(llamada_fallida)
+                    respuesta = {
+                        "texto": codigo_respaldo,
+                        "modelo_informado": "generador_local_cadquery_determinista_v1",
+                        "tokens_entrada": 0, "tokens_salida": 0,
+                        "finalizacion": "fallback", "proveedor": "local_deterministic_fallback",
+                        "perfil": {
+                            "modelo": "generador_local_cadquery_determinista_v1",
+                            "modelo_solicitado": modelo,
+                            "fallback_automatico": {
+                                "causa": _clasificar_fallo_proveedor(error),
+                                "error": str(error)[:1000],
+                            },
+                        },
+                    }
                     with crear_sesion() as sesion:
                         ejecucion = sesion.get(Ejecucion, identificador)
                         config = dict(ejecucion.configuracion_calidad or {})
                         config["tokens_presupuestados"] = tokens_presupuestados
                         config["llamadas_ia"] = llamadas
+                        config["generador_fallback_local"] = {
+                            "modelo": "generador_local_cadquery_determinista_v1",
+                            "causa": _clasificar_fallo_proveedor(error),
+                            "error": str(error)[:1000],
+                            "candidate_id": candidate_id,
+                        }
                         ejecucion.configuracion_calidad = config
                         sesion.commit()
-                    informe = {"iteracion": iteracion, "candidate_id": candidate_id,
-                               "parent_candidate_id": parent_id}
-                    _registrar_fallo_proveedor(identificador, intento_id, "generador", error, informe)
-                    detener_por_infraestructura = True
-                    break
                 respuesta = _datos_respuesta(respuesta, inicio_total, inicio_ia)
                 codigo = extraer_codigo(respuesta["texto"])
                 solicitud_base = {
@@ -741,10 +848,14 @@ def procesar_quality_loop(identificador: str) -> None:
                 _actualizar_estado_candidato(identificador, intento_id, "respuesta_recibida", None,
                     "Respuesta CAD recibida; pendiente de revisión estática.", codigo, respuesta,
                     solicitud_base)
+                respuesta_local = respuesta.get("proveedor") == "local_deterministic_fallback"
                 llamada_generador = {
-                    "rol": "generador", "proveedor": respuesta.get("proveedor"),
+                    "rol": "generador_local_fallback" if respuesta_local else "generador",
+                    "proveedor": respuesta.get("proveedor"),
                     "modelo_solicitado": modelo, "modelo_informado": respuesta.get("modelo_informado"),
-                    "endpoint_logico": "chat/completions" if respuesta.get("proveedor") != "ollama" else "api/chat",
+                    "endpoint_logico": ("cadquery_local" if respuesta_local else
+                                         "chat/completions" if respuesta.get("proveedor") != "ollama"
+                                         else "api/chat"),
                     "tokens_entrada": int(respuesta.get("tokens_entrada") or 0),
                     "tokens_salida": int(respuesta.get("tokens_salida") or 0),
                     "latencia_segundos": respuesta["duracion_ia"],
@@ -752,7 +863,8 @@ def procesar_quality_loop(identificador: str) -> None:
                     "parametros": respuesta.get("perfil"),
                 }
                 llamada_generador, tokens_presupuestados = _reservar_en_llamada(
-                    llamada_generador, reserva_generador, tokens_presupuestados
+                    llamada_generador, 0 if respuesta_local else reserva_generador,
+                    tokens_presupuestados,
                 )
                 llamadas_registradas.append(llamada_generador)
                 respuesta_codigo = None
@@ -770,6 +882,7 @@ def procesar_quality_loop(identificador: str) -> None:
 
                 revision_codigo = None
                 info_revisor = None
+                error_revisor_codigo = None
                 if static_error is None:
                     reserva_revisor = _reserva_tokens(
                         PROMPT_REVISOR_CODIGO + plan.model_dump_json() + codigo,
@@ -803,54 +916,63 @@ def procesar_quality_loop(identificador: str) -> None:
                                 or [catalogo_roles()["revisor_codigo"]["modelo"]]
                             )
                             llamadas_registradas.append(llamada_fallida)
-                            detalle_error = f"El revisor de código falló ({_clasificar_fallo_proveedor(error)})."
-                            informe_fallido = {
-                                "iteracion": iteracion, "candidate_id": candidate_id,
-                                "parent_candidate_id": parent_id, "technical_success": False,
-                                "quality_success": False, "quality_score": None,
-                                "code_review": {"estado": "error_proveedor"},
-                                "provider_calls": [llamada_generador, llamada_fallida],
-                                "errores": [detalle_error], "preserved_features": [],
-                                "repair_priority": [],
-                                "reference_protocol": "quality-v2-reference-authorized"
-                                    if QUALITY_ALLOW_REFERENCE_METRICS and caso_id else "no-reference",
-                            }
-                            _registrar_fallo_revisor(
-                                identificador, intento_id, "code_reviewer", error, informe_fallido,
-                                llamada_fallida, llamadas, tokens_presupuestados,
-                                llamadas_registradas,
+                            info_revisor = llamada_fallida
+                            revision_codigo = RevisionCodigo(accepted=False, severity="high")
+                            error_revisor_codigo = (
+                                f"El revisor de código falló ({_clasificar_fallo_proveedor(error)}); "
+                                "el resultado se conserva sujeto a la política estática y al supervisor CAD."
                             )
-                            intentos_perdidos_iteracion += 1
-                            intentos_perdidos_revisor += 1
-                            continue
-                        incremento = proveedor.llamadas - antes
-                        llamadas += max(1, incremento)
-                        info_revisor = _entrada_llamada("code_reviewer", respuesta_revisor,
-                            respuesta_revisor.modelo, "nvidia_nim")
-                        info_revisor["llamadas_http"] = max(1, incremento)
-                        info_revisor["modelos_intentados"] = list(
-                            getattr(router, "modelos_revisor_codigo", [])
-                            or [respuesta_revisor.modelo]
-                        )
-                        info_revisor["parametros"] = {"max_tokens": 4096, "temperature": 0}
-                        info_revisor, tokens_presupuestados = _reservar_en_llamada(
-                            info_revisor, reserva_revisor * max(1, incremento), tokens_presupuestados
-                        )
-                        llamadas_registradas.append(info_revisor)
-                        respuesta_codigo = respuesta_revisor
+                            with crear_sesion() as sesion:
+                                ejecucion_actual = sesion.get(Ejecucion, identificador)
+                                config_actual = dict(ejecucion_actual.configuracion_calidad or {})
+                                errores_revisores = list(config_actual.get("errores_revisores") or [])
+                                errores_revisores.append({
+                                    "rol": "code_reviewer", "candidate_id": candidate_id,
+                                    "error": str(error)[:1000],
+                                    "estado": _clasificar_fallo_proveedor(error),
+                                })
+                                config_actual.update({
+                                    "errores_revisores": errores_revisores,
+                                    "llamadas_ia": llamadas,
+                                    "tokens_presupuestados": tokens_presupuestados,
+                                    "llamadas": list(llamadas_registradas),
+                                })
+                                ejecucion_actual.configuracion_calidad = config_actual
+                                sesion.commit()
+                        if info_revisor is None:
+                            incremento = proveedor.llamadas - antes
+                            llamadas += max(1, incremento)
+                            info_revisor = _entrada_llamada("code_reviewer", respuesta_revisor,
+                                respuesta_revisor.modelo, "nvidia_nim")
+                            info_revisor["llamadas_http"] = max(1, incremento)
+                            info_revisor["modelos_intentados"] = list(
+                                getattr(router, "modelos_revisor_codigo", [])
+                                or [respuesta_revisor.modelo]
+                            )
+                            info_revisor["parametros"] = {"max_tokens": 4096, "temperature": 0}
+                            info_revisor, tokens_presupuestados = _reservar_en_llamada(
+                                info_revisor, reserva_revisor * max(1, incremento), tokens_presupuestados
+                            )
+                            llamadas_registradas.append(info_revisor)
+                            respuesta_codigo = respuesta_revisor
                 code_review_json = _json(revision_codigo) if revision_codigo else {
                     "estado": "rejected_static", "error": static_error,
                 }
+                if error_revisor_codigo:
+                    code_review_json.update({"estado": "error_proveedor", "error": error_revisor_codigo})
                 candidato = {
                     "iteracion": iteracion, "candidate_id": candidate_id,
                     "parent_candidate_id": parent_id, "technical_success": False,
                     "quality_success": False, "quality_score": None,
                     "code_review": code_review_json, "provider_calls": [llamada_generador]
+                        + ([llamada_generador_fallida] if llamada_generador_fallida else [])
                         + ([info_revisor] if info_revisor else []),
                     "errores": [], "preserved_features": [], "repair_priority": [],
                     "reference_protocol": "quality-v2-reference-authorized"
                         if QUALITY_ALLOW_REFERENCE_METRICS and caso_id else "no-reference",
                 }
+                if error_revisor_codigo:
+                    candidato["errores"].append(error_revisor_codigo)
                 resultado_cad = None
                 diagnostico = static_error or ""
                 fase_error = "politica" if static_error else None
@@ -860,11 +982,15 @@ def procesar_quality_loop(identificador: str) -> None:
                                or revision_codigo.severity in {"high", "critical"}
                                or any(issue.severidad in {"high", "critical"} for issue in revision_codigo.issues))
                     if bloquea:
-                        estado_intento = "invalido"
-                        fase_error = "revisor_codigo"
                         candidato["resultado_clasificado"] = "review_rejected"
-                        diagnostico = "El revisor de código rechazó el programa antes de ejecutar el CAD"
-                        candidato["errores"].append(diagnostico)
+                        if not error_revisor_codigo:
+                            candidato["errores"].append(
+                                "El revisor de código rechazó el programa; el CAD aún debe superar "
+                                "la política estática y el supervisor aislado."
+                            )
+                        # La política estática y el runtime aislado determinan el éxito técnico;
+                        # una revisión ausente o negativa mantiene Quality Gate cerrado.
+                        bloquea = False
                 else:
                     bloquea = True
                     candidato["errores"].append(static_error or "El code reviewer no pudo completarse")
@@ -1157,6 +1283,10 @@ def procesar_quality_loop(identificador: str) -> None:
                     "validacion_cad": candidato.get("technical_result", {}),
                     "quality_loop": {"quality_success": candidato["quality_success"],
                                      "candidate_id": candidate_id, "iteracion": iteracion}}
+                if error_revisor_codigo:
+                    solicitud_final["fallo_revisor"] = {
+                        "rol": "code_reviewer", "error": error_revisor_codigo,
+                    }
                 _actualizar_estado_candidato(identificador, intento_id, estado_intento,
                     fase_error, diagnostico, codigo, respuesta, solicitud_final, resultado_cad)
                 with crear_sesion() as sesion:

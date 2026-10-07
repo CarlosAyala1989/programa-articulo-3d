@@ -23,9 +23,12 @@ from aplicacion.calidad.modelos import (
     FeaturePlan, PlanGeometrico, RevisionCodigo, RevisionVisual, VectorPlan,
 )
 from aplicacion.calidad.nvidia import ErrorNvidia, ProveedorNvidia, RouterModelos
+from aplicacion.calidad.planificador_local import construir_plan_local
+from aplicacion.calidad.generador_local import generar_cadquery_de_casa
 from aplicacion.calidad.prompts import instruccion_modeler, validar_plan_para_descripcion
 from aplicacion.calidad.recipes import seleccionar_recipes, texto_recipes
 from aplicacion.proveedores import solicitar_codigo
+from aplicacion.proveedor_deepseek import ErrorProveedor
 from aplicacion.configuracion import (
     MODELOS_NVIDIA_GENERADORES, NVIDIA_MODEL_CODE_REVIEWER, NVIDIA_MODEL_GENERATOR,
     NVIDIA_MODEL_CODE_REVIEWER_FALLBACK, NVIDIA_MODEL_PLANNER, NVIDIA_MODEL_PLANNER_FALLBACK,
@@ -53,6 +56,36 @@ def respuesta(texto="{}", modelo="fake/model"):
 
 
 class GeometricPlanTests(unittest.TestCase):
+    def test_planificador_local_conserva_cotas_y_rasgos_del_prompt_de_casa(self):
+        descripcion = (
+            "Casa sencilla de 40 × 25 × 12 mm, con fachada rectangular, techo a dos aguas, "
+            "una puerta centrada de 8 × 12 mm y dos ventanas cuadradas de 6 × 6 mm, "
+            "una a cada lado de la puerta. Diseño simple, con paredes y techo sólidos, "
+            "sin detalles adicionales, listo para impresión 3D."
+        )
+        plan = construir_plan_local(descripcion)
+        validar_plan_para_descripcion(descripcion, plan)
+        self.assertEqual(plan.clase_modelado, "MECHANICAL_PRECISE")
+        self.assertEqual([plan.bounding_box_esperada.x.valor,
+                          plan.bounding_box_esperada.y.valor,
+                          plan.bounding_box_esperada.z.valor], [40, 25, 12])
+        features = {feature.feature_id: feature for feature in plan.features}
+        self.assertEqual(set(features), {
+            "cuerpo_principal", "techo", "puerta", "ventana_izquierda", "ventana_derecha",
+        })
+        self.assertEqual(features["puerta"].dimensiones["ancho"].valor, 8)
+        self.assertEqual(features["puerta"].dimensiones["alto"].valor, 12)
+        self.assertEqual(features["ventana_izquierda"].dimensiones["ancho"].valor, 6)
+        self.assertEqual(features["techo"].dimensiones, {})
+        codigo = generar_cadquery_de_casa(plan)
+        revisar_codigo(codigo, "cadquery")
+        self.assertIn("resultado = paredes.union(perfil_techo)", codigo)
+        self.assertIn("resultado = resultado.cut(cortador_puerta)", codigo)
+        self.assertIn("cortador_ventana_1", codigo)
+        self.assertIn("cortador_ventana_2", codigo)
+        with self.assertRaisesRegex(ValueError, "categoría casa"):
+            generar_cadquery_de_casa(plan_mecanico())
+
     def test_dimensiones_explicitas_y_coordenadas_negativas(self):
         plan = plan_mecanico()
         validar_plan_para_descripcion("Placa de 100 x 60 x 10 mm", plan)
@@ -282,6 +315,8 @@ class NvidiaProviderTests(unittest.TestCase):
         self.assertEqual(opciones["quality_loop"]["modelo_nvidia_generador"], NVIDIA_MODEL_GENERATOR)
         self.assertIn("nvidia/nemotron-3-super-120b-a12b", opciones["modelos"])
         self.assertIn("moonshotai/kimi-k3", opciones["modelos"])
+        self.assertIn("google/gemma-4-31b-it", opciones["modelos"])
+        self.assertIn("z-ai/glm-5.3", opciones["modelos"])
         self.assertNotIn("nvidia/nemotron-3-ultra-550b-a55b", opciones["modelos"])
         for modelo in MODELOS_NVIDIA_GENERADORES:
             self.assertIn(modelo, opciones["modelos"])
@@ -386,6 +421,27 @@ class NvidiaProviderTests(unittest.TestCase):
             "modelo_respaldo": modelo_respaldo,
             "causa": "timeout",
         })
+
+    def test_timeout_de_generadores_nuevos_alterna_gemma_y_glm(self):
+        mensajes = [{"role": "user", "content": "Genera una pieza sencilla"}]
+        for modelo_primario, modelo_respaldo in (
+            ("google/gemma-4-31b-it", "z-ai/glm-5.3"),
+            ("z-ai/glm-5.3", "google/gemma-4-31b-it"),
+        ):
+            with self.subTest(modelo=modelo_primario), patch(
+                "aplicacion.proveedores.ProveedorNvidia"
+            ) as constructor:
+                constructor.return_value.generar.side_effect = [
+                    ErrorNvidia("Timeout NVIDIA", "timeout"),
+                    respuesta("resultado = 1", modelo_respaldo),
+                ]
+                resultado = solicitar_codigo(modelo_primario, mensajes)
+            self.assertEqual(resultado["modelo_informado"], modelo_respaldo)
+            self.assertEqual(resultado["perfil"]["fallback_automatico"], {
+                "modelo_primario": modelo_primario,
+                "modelo_respaldo": modelo_respaldo,
+                "causa": "timeout",
+            })
 
     def test_timeout_nemotron_cambia_a_deepseek_pro_con_limite_acotado(self):
         mensajes = [{"role": "user", "content": "Genera una casa simple"}]
@@ -596,17 +652,26 @@ class QualityGateTests(unittest.TestCase):
 
 class QualityLoopIntegrationTests(unittest.TestCase):
     def test_fallo_de_cualquier_revisor_consume_intento_y_el_loop_continua(self):
-        for rol_fallido in ("code_reviewer", "visual_reviewer", "geometric_critic"):
+        for rol_fallido in (
+            "planner", "planner_validation", "generator", "code_reviewer",
+            "visual_reviewer", "geometric_critic",
+        ):
             with self.subTest(rol=rol_fallido):
                 motor_db = create_engine("sqlite://", connect_args={"check_same_thread": False},
                                          poolclass=StaticPool)
                 BaseDeclarativa.metadata.create_all(motor_db)
                 Sesiones = sessionmaker(bind=motor_db, expire_on_commit=False)
                 ejecucion_id = f"{len(rol_fallido):08d}-1111-4111-8111-111111111111"
+                descripcion = (
+                    "Casa sencilla de 40 × 25 × 12 mm, con fachada rectangular, techo a dos aguas, "
+                    "una puerta centrada de 8 × 12 mm y dos ventanas cuadradas de 6 × 6 mm, "
+                    "una a cada lado de la puerta. Diseño simple, con paredes y techo sólidos."
+                    if rol_fallido == "generator" else "Placa de 100 x 60 x 10 mm"
+                )
                 with Sesiones() as sesion:
                     sesion.add(Ejecucion(
                         identificador=ejecucion_id,
-                        descripcion="Placa de 100 x 60 x 10 mm", motor="cadquery",
+                        descripcion=descripcion, motor="cadquery",
                         modelo="deepseek-v4-pro", modo="quality-loop", maximo_intentos=3,
                         estado="pendiente", mensaje="En cola",
                         configuracion_calidad={"best_of_n": False},
@@ -627,7 +692,20 @@ class QualityLoopIntegrationTests(unittest.TestCase):
 
                     def planificar(self, descripcion, permitir_fallback=True):
                         self.proveedor.llamadas += 1
+                        if rol_fallido == "planner":
+                            raise ErrorNvidia("Timeout simulado en planner", "timeout")
+                        if rol_fallido == "planner_validation":
+                            plan = plan_mecanico().model_copy(update={"bounding_box_esperada": CajaPlan(
+                                x=dimension(90), y=dimension(60), z=dimension(10))})
+                            return plan, respuesta(modelo="nvidia/nemotron-3-super-120b-a12b")
+                        if rol_fallido == "generator":
+                            return construir_plan_local(descripcion), respuesta(
+                                modelo="nvidia/nemotron-3-super-120b-a12b")
                         return plan_mecanico(), respuesta(modelo="nvidia/nemotron-3-ultra-550b-a55b")
+
+                    def planificar_alternativo(self, descripcion):
+                        self.proveedor.llamadas += 1
+                        raise ErrorNvidia("Timeout simulado en planner alternativo", "timeout")
 
                     def revisar_codigo(self, motor, plan, codigo):
                         llamada = self._comprobar_fallo("code_reviewer")
@@ -647,6 +725,8 @@ class QualityLoopIntegrationTests(unittest.TestCase):
 
                 def generar(modelo, mensajes, esfuerzo, maximo_tokens=None):
                     llamadas_generacion.append(mensajes)
+                    if rol_fallido == "generator":
+                        raise ErrorProveedor("Timeout simulado del generador")
                     return {"texto": "import cadquery as cq\nresultado = cq.Workplane('XY').box(100, 60, 10)",
                         "modelo_informado": modelo, "tokens_entrada": 100, "tokens_salida": 40,
                         "finalizacion": "stop", "proveedor": "deepseek", "perfil": {"max_tokens": 1000}}
@@ -687,36 +767,58 @@ class QualityLoopIntegrationTests(unittest.TestCase):
                     archivos_guardados = list(sesion.scalars(select(ArchivoGenerado).where(
                         ArchivoGenerado.ejecucion_identificador == ejecucion_id
                     )))
-                    self.assertEqual(ejecucion.estado, "fallida")
-                    self.assertEqual(ejecucion.numero_intentos, 3)
-                    self.assertEqual(ejecucion.configuracion_calidad["estado_protocolo"],
-                                     "reviewer_attempts_exhausted")
-                    self.assertEqual(len(llamadas_generacion), 3)
-                    self.assertEqual(len(intentos), 3)
-                    self.assertEqual(len(informes), 3)
-                    self.assertTrue(all(i.estado == "error_proveedor" for i in intentos))
-                    self.assertTrue(all(i.fase_error == "proveedor" for i in intentos))
-                    self.assertTrue(all(i.solicitud_modelo["fallo_revisor"]["rol"] == rol_fallido
-                                        for i in intentos))
-                    self.assertTrue(all(i.resultado["resultado_clasificado"] == "reviewer_failed_attempt"
-                                        for i in informes))
-                    self.assertEqual(len(ejecucion.configuracion_calidad["errores_revisores"]), 3)
-                    self.assertIn("3 intentos se perdieron", ejecucion.mensaje)
-                    self.assertFalse(ejecucion.configuracion_calidad["quality_success"])
-                    if rol_fallido == "code_reviewer":
-                        self.assertFalse(ejecucion.configuracion_calidad["technical_success"])
-                        self.assertFalse(archivos_guardados)
+                    if rol_fallido in {"planner", "planner_validation"}:
+                        self.assertIn(ejecucion.estado, {"completada", "fallida"})
+                        self.assertEqual(ejecucion.configuracion_calidad["planner_fallback_local"]["causa"],
+                                         "timeout")
+                        self.assertTrue(ejecucion.configuracion_calidad["technical_success"])
+                        self.assertTrue(archivos_guardados)
+                        self.assertGreaterEqual(runtime.call_count, 1)
+                    elif rol_fallido == "generator":
+                        self.assertIn(ejecucion.estado, {"completada", "fallida"})
+                        self.assertEqual(
+                            ejecucion.configuracion_calidad["generador_fallback_local"]["modelo"],
+                            "generador_local_cadquery_determinista_v1",
+                        )
+                        self.assertTrue(ejecucion.configuracion_calidad["technical_success"])
+                        self.assertTrue(archivos_guardados)
+                        self.assertEqual(runtime.call_count, 3)
+                    elif rol_fallido == "code_reviewer":
+                        self.assertEqual(ejecucion.estado, "fallida")
+                        self.assertEqual(ejecucion.configuracion_calidad["estado_protocolo"],
+                                         "quality_rejected")
+                        self.assertTrue(ejecucion.configuracion_calidad["technical_success"])
+                        self.assertTrue(all(i.solicitud_modelo["fallo_revisor"]["rol"] == rol_fallido
+                                            for i in intentos))
+                        self.assertTrue(archivos_guardados)
+                        self.assertEqual(runtime.call_count, 3)
                     else:
+                        self.assertEqual(ejecucion.estado, "fallida")
+                        self.assertEqual(ejecucion.numero_intentos, 3)
+                        self.assertEqual(ejecucion.configuracion_calidad["estado_protocolo"],
+                                         "reviewer_attempts_exhausted")
+                        self.assertEqual(len(llamadas_generacion), 3)
+                        self.assertEqual(len(intentos), 3)
+                        self.assertEqual(len(informes), 3)
+                        self.assertTrue(all(i.estado == "error_proveedor" for i in intentos))
+                        self.assertTrue(all(i.fase_error == "proveedor" for i in intentos))
+                        self.assertTrue(all(i.solicitud_modelo["fallo_revisor"]["rol"] == rol_fallido
+                                            for i in intentos))
+                        self.assertTrue(all(i.resultado["resultado_clasificado"] == "reviewer_failed_attempt"
+                                            for i in informes))
+                        self.assertEqual(len(ejecucion.configuracion_calidad["errores_revisores"]), 3)
+                        self.assertIn("3 intentos se perdieron", ejecucion.mensaje)
+                        self.assertFalse(ejecucion.configuracion_calidad["quality_success"])
                         self.assertTrue(ejecucion.configuracion_calidad["technical_success"])
                         self.assertIn("pieza.stl", {archivo.nombre for archivo in archivos_guardados})
                         self.assertIsNotNone(ejecucion.primer_exito_cad)
-                if rol_fallido == "code_reviewer":
-                    runtime.assert_not_called()
+                if rol_fallido in {"planner", "planner_validation", "generator", "code_reviewer"}:
+                    self.assertGreaterEqual(runtime.call_count, 1)
                 else:
                     self.assertEqual(runtime.call_count, 3)
                 motor_db.dispose()
 
-    def test_quality_loop_agota_tres_ciclos_si_laguna_rechaza_cada_candidato(self):
+    def test_revision_codigo_negativa_no_omite_el_runtime_cad(self):
         motor_db = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
         BaseDeclarativa.metadata.create_all(motor_db)
         Sesiones = sessionmaker(bind=motor_db, expire_on_commit=False)
@@ -753,10 +855,14 @@ class QualityLoopIntegrationTests(unittest.TestCase):
                  patch("aplicacion.calidad.flujo.ProveedorNvidia", return_value=proveedor_fake), \
                  patch("aplicacion.calidad.flujo.RouterModelos", RouterFalso), \
                  patch("aplicacion.calidad.flujo.solicitar_codigo", side_effect=generar), \
-                 patch("aplicacion.calidad.flujo.solicitar_ejecucion_cad") as runtime, \
+                 patch("aplicacion.calidad.flujo.solicitar_ejecucion_cad", return_value={
+                     "correcto": False, "fase_error": "cad", "diagnostico": "Rechazo CAD simulado",
+                     "sintaxis_valida": True, "ejecucion_correcta": True,
+                     "cad_valido": False, "exportacion_valida": None,
+                 }) as runtime, \
                  patch("aplicacion.calidad.flujo.DIRECTORIO_ARTEFACTOS", directorio):
                 flujo.procesar_quality_loop(ejecucion_id)
-            runtime.assert_not_called()
+            self.assertEqual(runtime.call_count, 3)
         with Sesiones() as sesion:
             ejecucion = sesion.get(Ejecucion, ejecucion_id)
             informes = list(sesion.scalars(select(InformeCalidad).where(

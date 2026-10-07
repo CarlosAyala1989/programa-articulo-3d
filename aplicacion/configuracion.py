@@ -25,10 +25,13 @@ MODELOS_NVIDIA_CATALOGO = {
     "moonshotai/kimi-k3": "Kimi K3 · Revisor visual",
     "deepseek-ai/deepseek-v4.1-flash": "DeepSeek V4.1 Flash · Endpoint NVIDIA experimental",
     "z-ai/glm-5.3": "GLM 5.3 · Juez textual",
+    "google/gemma-4-31b-it": "Gemma 4 31B · Generación CAD",
 }
 MODELOS_NVIDIA_GENERADORES = {
     "nvidia/nemotron-3-super-120b-a12b": "NVIDIA NIM · Nemotron 3 Super (código)",
     "moonshotai/kimi-k3": "NVIDIA NIM · Kimi K3 (código alternativo)",
+    "google/gemma-4-31b-it": "NVIDIA NIM · Gemma 4 31B (código)",
+    "z-ai/glm-5.3": "NVIDIA NIM · GLM 5.3 (código)",
 }
 ESFUERZOS_RAZONAMIENTO_GENERACION_NVIDIA = {
     "nvidia/nemotron-3-super-120b-a12b": "low",
@@ -38,6 +41,8 @@ MODELOS_RESPALDO_GENERACION_NVIDIA = {
     "nvidia/nemotron-3-super-120b-a12b": "deepseek-v4-pro",
     "moonshotai/kimi-k3": "nvidia/nemotron-3-super-120b-a12b",
     "nvidia/nemotron-3-ultra-550b-a55b": "nvidia/nemotron-3-super-120b-a12b",
+    "google/gemma-4-31b-it": "z-ai/glm-5.3",
+    "z-ai/glm-5.3": "google/gemma-4-31b-it",
 }
 try:
     NVIDIA_GENERACION_TIMEOUT_SEGUNDOS = max(30, min(300,
