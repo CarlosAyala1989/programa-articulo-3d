@@ -28,8 +28,11 @@ MODELOS_NVIDIA_CATALOGO = {
 }
 MODELOS_NVIDIA_GENERADORES = {
     "nvidia/nemotron-3-super-120b-a12b": "NVIDIA NIM · Nemotron 3 Super (código)",
-    "nvidia/nemotron-3-ultra-550b-a55b": "NVIDIA NIM · Nemotron 3 Ultra (código complejo)",
     "moonshotai/kimi-k3": "NVIDIA NIM · Kimi K3 (código alternativo)",
+}
+ESFUERZOS_RAZONAMIENTO_GENERACION_NVIDIA = {
+    "nvidia/nemotron-3-super-120b-a12b": "low",
+    "nvidia/nemotron-3-ultra-550b-a55b": "medium",
 }
 MODELO_COSMOS_EXPERIMENTAL = os.environ.get("NVIDIA_MODEL_VISUAL_REASONER", "").strip()
 QUALITY_ALLOW_REFERENCE_METRICS = os.environ.get("QUALITY_ALLOW_REFERENCE_METRICS", "0") == "1"
@@ -49,10 +52,10 @@ except ValueError:
     MAXIMO_TOKENS_SALIDA_QUALITY_GENERADOR = 32768
 MAXIMO_ITERACIONES_QUALITY_LOOP = 3
 NVIDIA_MODEL_PLANNER = os.environ.get(
-    "NVIDIA_MODEL_PLANNER", "nvidia/nemotron-3-ultra-550b-a55b"
+    "NVIDIA_MODEL_PLANNER", "nvidia/nemotron-3-super-120b-a12b"
 )
 NVIDIA_MODEL_PLANNER_FALLBACK = os.environ.get(
-    "NVIDIA_MODEL_PLANNER_FALLBACK", "nvidia/nemotron-3-super-120b-a12b"
+    "NVIDIA_MODEL_PLANNER_FALLBACK", "moonshotai/kimi-k3"
 )
 NVIDIA_MODEL_CODE_REVIEWER = os.environ.get("NVIDIA_MODEL_CODE_REVIEWER", "nvidia/nemotron-3-super-120b-a12b")
 NVIDIA_MODEL_VISUAL_REVIEWER = os.environ.get("NVIDIA_MODEL_VISUAL_REVIEWER", "moonshotai/kimi-k3")
@@ -124,7 +127,8 @@ def perfil_generacion(
     if modelo in MODELOS_NVIDIA_REGISTRADOS:
         if maximo_tokens is not None:
             raise ValueError("El límite DeepSeek no corresponde al endpoint NVIDIA NIM")
-        return {"max_tokens": MAXIMO_TOKENS_NVIDIA, "temperature": 0.1}
+        return {"max_tokens": MAXIMO_TOKENS_NVIDIA, "temperature": 0.1,
+                "reasoning_effort": ESFUERZOS_RAZONAMIENTO_GENERACION_NVIDIA.get(modelo)}
     if maximo_tokens is not None and (
         isinstance(maximo_tokens, bool) or not isinstance(maximo_tokens, int)
         or not 1 <= maximo_tokens <= MAXIMO_TOKENS_DEEPSEEK

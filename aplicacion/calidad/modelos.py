@@ -3,7 +3,7 @@
 import re
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 
 class ModeloEstricto(BaseModel):
@@ -166,7 +166,9 @@ class ErrorGeometrico(ModeloEstricto):
 
 class CriticaGeometrica(ModeloEstricto):
     accepted: bool
-    errores: list[ErrorGeometrico] = Field(default_factory=list)
+    errores: list[ErrorGeometrico] = Field(
+        default_factory=list, validation_alias=AliasChoices("errores", "errors")
+    )
     preservar: list[str] = Field(default_factory=list)
     prioridad_reparacion: list[str] = Field(default_factory=list)
     observacion: str = ""
@@ -177,5 +179,7 @@ class RevisionVisual(ModeloEstricto):
     puntuacion_silueta: float = Field(ge=0, le=1)
     puntuacion_proporciones: float = Field(ge=0, le=1)
     puntuacion_features: float = Field(ge=0, le=1)
-    errores: list[ErrorGeometrico] = Field(default_factory=list)
+    errores: list[ErrorGeometrico] = Field(
+        default_factory=list, validation_alias=AliasChoices("errores", "errors")
+    )
     observacion: str = ""

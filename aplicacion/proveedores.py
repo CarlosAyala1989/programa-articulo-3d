@@ -66,6 +66,7 @@ def solicitar_codigo(
             respuesta = ProveedorNvidia().generar(
                 modelo, mensajes, maximo_tokens=perfil["max_tokens"],
                 temperatura=perfil["temperature"],
+                esfuerzo_razonamiento=perfil["reasoning_effort"],
             )
         except ErrorNvidia as error:
             raise ErrorProveedor(str(error)) from None

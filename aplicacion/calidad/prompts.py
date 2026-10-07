@@ -14,8 +14,11 @@ frente, dimensiones globales, componentes con feature_id estable, operaciones, p
 trayectorias, relaciones padre/hijo, simetrías, restricciones y criterios verificables.
 Cada medida es un objeto con valor, unidad mm y procedencia specified o inferred. Usa specified
 solo para cotas presentes literalmente en la descripción; no cambies ni redondees esas cotas.
-Si infieres una medida, marca inferred y explica brevemente la inferencia. No inventes una
-referencia ni una exactitud arqueológica. Devuelve únicamente JSON válido, sin Markdown."""
+Si infieres una medida, marca inferred y explica brevemente la inferencia. Las coordenadas
+derivadas por centrado, simetría, origen o alineación —incluido el valor cero— son inferred salvo
+que la descripción indique literalmente esa coordenada. No marques como specified medidas o
+posiciones calculadas a partir de otras cotas. No inventes una referencia ni una exactitud
+arqueológica. Devuelve únicamente JSON válido, sin Markdown."""
 
 ESTRATEGIAS = {
     "MECHANICAL_PRECISE": "cotas exactas, sketches acotados, extrusión, revolución, agujeros, patrones y operaciones simples; evita splines y lofts si no los pide la geometría.",

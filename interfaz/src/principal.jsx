@@ -35,9 +35,10 @@ function InformeCalidad({ informe, ejecucionId }) {
   const compuerta = informe.quality_gate || {};
   const tecnico = informe.technical_result || {};
   const critica = informe.critic_review || {};
+  const rolesRevisor = { code_reviewer: 'código', visual_reviewer: 'visual', geometric_critic: 'geométrico' };
   const etiquetaEstado = (valor) => valor === true ? 'Sí' : valor === false ? 'No' : 'Sin dato';
   return <details key={informe.candidate_id}>
-    <summary><span className={`etiqueta ${informe.quality_success ? 'correcto' : ''}`}>{informe.quality_success ? '✓' : '!'}</span><strong>{informe.candidate_id}</strong><small>{informe.seleccionado_final ? 'Ganador final' : informe.seleccionado_para_reparacion ? 'Base de reparación' : 'Candidato'}</small></summary>
+    <summary><span className={`etiqueta ${informe.quality_success ? 'correcto' : ''}`}>{informe.quality_success ? '✓' : '!'}</span><strong>{informe.candidate_id}</strong><small>{informe.resultado_clasificado === 'reviewer_failed_attempt' ? 'Intento perdido · fallo de revisión' : informe.seleccionado_final ? 'Ganador final' : informe.seleccionado_para_reparacion ? 'Base de reparación' : 'Candidato'}</small></summary>
     <div className="detalle informe-calidad">
       <p><strong>Éxito técnico:</strong> {informe.technical_success ? 'CAD válido y exportable' : 'No se validó técnicamente'} · <strong>Quality Gate:</strong> {compuerta.accepted ? 'aceptado' : 'rechazado'}{typeof compuerta.quality_score === 'number' ? ` · ${(compuerta.quality_score * 100).toFixed(1)} %` : ''}</p>
       <h4>Validación técnica</h4>
@@ -52,6 +53,7 @@ function InformeCalidad({ informe, ejecucionId }) {
       {informe.critic_review && <><h4>Crítica geométrica</h4><p>{critica.accepted ? 'Aceptada' : 'Rechazada'}{critica.observacion && ` · ${critica.observacion}`}</p>{critica.errores?.length > 0 && <ul>{critica.errores.map((error, indice) => <li key={`${error.feature_id || 'geometria'}-${indice}`}>{error.feature_id || 'Pieza'}: {error.causa_probable} · {error.estrategia_reparacion}</li>)}</ul>}</>}
       <h4>Quality Gate</h4>
       <p>{compuerta.accepted ? 'Aceptado' : 'Rechazado'}{typeof compuerta.threshold === 'number' && ` · umbral ${(compuerta.threshold * 100).toFixed(0)} %`}{compuerta.motivo && ` · ${compuerta.motivo}`}</p>
+      {informe.provider_error && <p className="error"><strong>Intento perdido:</strong> falló el agente de revisión {rolesRevisor[informe.provider_error.rol] || informe.provider_error.rol} ({informe.provider_error.estado}). {informe.provider_error.error}</p>}
       {compuerta.evidence_missing?.length > 0 && <p>Evidencia faltante: {compuerta.evidence_missing.join(', ')}</p>}
       {compuerta.features_esenciales_incorrectas?.length > 0 && <p>Features esenciales incorrectas: {compuerta.features_esenciales_incorrectas.join(', ')}</p>}
       {compuerta.cotas_explicitas_incorrectas?.length > 0 && <p>Cotas explícitas fuera de tolerancia: {compuerta.cotas_explicitas_incorrectas.join(', ')}</p>}

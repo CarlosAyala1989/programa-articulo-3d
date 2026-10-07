@@ -30,7 +30,8 @@ from aplicacion.configuracion import (
     MAXIMO_LLAMADAS_QUALITY_LOOP, MAXIMO_TOKENS_QUALITY_LOOP,
     MAXIMO_TOKENS_SALIDA_QUALITY_GENERADOR, MAXIMO_TOKENS_NVIDIA,
     MAXIMO_TOKENS_SALIDA, MODELOS_DISPONIBLES, MODELOS_NVIDIA_REGISTRADOS,
-    MODELOS_LOCALES, QUALITY_ALLOW_REFERENCE_METRICS, URL_EVALUADOR, VERSION_PLANTILLA,
+    MODELOS_LOCALES, NVIDIA_MODEL_PLANNER_FALLBACK, QUALITY_ALLOW_REFERENCE_METRICS,
+    URL_EVALUADOR, VERSION_PLANTILLA,
 )
 from aplicacion.costos import costo_estimado
 from aplicacion.generacion import extraer_codigo, guardar_archivos, revisar_codigo, solicitar_ejecucion_cad
@@ -76,6 +77,20 @@ def _entrada_llamada(rol: str, respuesta, modelo_solicitado: str, proveedor: str
         "latencia_segundos": float(getattr(respuesta, "latencia_segundos", 0) or 0),
         "finish_reason": getattr(respuesta, "finalizacion", "desconocida"),
         "request_id": getattr(respuesta, "request_id", None),
+    }
+
+
+def _entrada_llamada_fallida(rol: str, modelo: str, error: Exception,
+                             latencia: float, reserva: int,
+                             llamadas_http: int) -> dict:
+    return {
+        "rol": rol, "proveedor": "nvidia_nim", "modelo_solicitado": modelo,
+        "endpoint_logico": "chat/completions", "tokens_entrada": 0,
+        "tokens_salida": 0, "costo_estimado_usd": None,
+        "latencia_segundos": latencia, "llamadas_http": llamadas_http,
+        "tokens_reservados": reserva * llamadas_http,
+        "tokens_presupuestados": reserva * llamadas_http,
+        "error": str(error)[:1000], "tipo_error": type(error).__name__,
     }
 
 
@@ -164,6 +179,106 @@ def _registrar_fallo_proveedor(ejecucion_id: str, intento_id: int, rol: str,
         sesion.commit()
 
 
+def _registrar_fallo_revisor(ejecucion_id: str, intento_id: int, rol: str,
+                             error: Exception, informe: dict, llamada: dict,
+                             llamadas: int, tokens_presupuestados: int,
+                             llamadas_registradas: list[dict],
+                             resultado_cad: dict | None = None, motor: str | None = None,
+                             codigo: str = "", imagen: bytes | None = None) -> None:
+    """Guarda el fallo del revisor como intento perdido y permite seguir el bucle."""
+    clasificacion = _clasificar_fallo_proveedor(error)
+    rol_legible = {"code_reviewer": "de código", "visual_reviewer": "visual",
+                   "geometric_critic": "geométrico"}.get(rol, rol)
+    detalle = {"estado": clasificacion, "rol": rol,
+               "error": str(error)[:1000], "tipo_error": type(error).__name__}
+    informe = dict(informe)
+    informe.update({
+        "provider_error": detalle,
+        "resultado_clasificado": "reviewer_failed_attempt",
+        "quality_success": False,
+    })
+    informe.setdefault("quality_gate", {
+        "accepted": False, "quality_success": False,
+        "motivo": f"La revisión {rol_legible} falló; el intento se contabilizó como perdido.",
+    })
+    informe.setdefault("errores", []).append(
+        f"La revisión {rol_legible} falló ({clasificacion}); intento contabilizado como perdido."
+    )
+    with crear_sesion() as sesion:
+        intento = sesion.get(IntentoGeneracion, intento_id)
+        ejecucion = sesion.get(Ejecucion, ejecucion_id)
+        intento.estado = "error_proveedor"
+        intento.fase_error = "proveedor"
+        intento.diagnostico = (
+            f"La revisión {rol_legible} falló ({clasificacion}); el intento se contabilizó como perdido."
+        )
+        solicitud = dict(intento.solicitud_modelo or {})
+        solicitud["fallo_revisor"] = detalle
+        intento.solicitud_modelo = solicitud
+        if resultado_cad:
+            intento.sintaxis_valida = resultado_cad.get("sintaxis_valida")
+            intento.ejecucion_correcta = resultado_cad.get("ejecucion_correcta")
+            intento.cad_valido = resultado_cad.get("cad_valido")
+            intento.exportacion_valida = resultado_cad.get("exportacion_valida")
+            intento.runtime_identificador = resultado_cad.get("runtime_identificador")
+            intento.duracion_cad_segundos = resultado_cad.get("duracion_cad")
+            if resultado_cad.get("correcto") is True and motor and codigo:
+                try:
+                    informe["artefactos"] = _guardar_candidato(
+                        ejecucion_id, informe["candidate_id"], motor,
+                        resultado_cad["archivos"], codigo, intento_id, sesion,
+                    )
+                    if imagen:
+                        informe["lamina"] = _guardar_lamina(
+                            ejecucion_id, informe["candidate_id"], imagen, intento_id, sesion,
+                        )
+                except (ValueError, OSError, KeyError) as error_archivo:
+                    informe.setdefault("errores", []).append(
+                        f"No se pudieron conservar los artefactos del CAD válido: {type(error_archivo).__name__}"
+                    )
+        _persistir_informe(
+            sesion, ejecucion_id, intento_id, int(informe.get("iteracion", 1)),
+            informe["candidate_id"], informe.get("parent_candidate_id"), informe,
+        )
+        configuracion = dict(ejecucion.configuracion_calidad or {})
+        configuracion["estado_protocolo"] = "en_evaluacion"
+        configuracion["llamadas_ia"] = llamadas
+        configuracion["tokens_presupuestados"] = tokens_presupuestados
+        configuracion["llamadas"] = list(llamadas_registradas)
+        errores = list(configuracion.get("errores_revisores") or [])
+        errores.append({**detalle, "intento": intento.numero,
+                        "candidate_id": informe["candidate_id"]})
+        configuracion["errores_revisores"] = errores
+        candidatos = list(configuracion.get("candidatos") or [])
+        candidatos.append({
+            "candidate_id": informe["candidate_id"],
+            "iteracion": int(informe.get("iteracion", 1)),
+            "parent_candidate_id": informe.get("parent_candidate_id"),
+            "attempt_id": intento_id,
+            "technical_success": bool(informe.get("technical_success")),
+            "quality_success": False,
+            "quality_score": None,
+            "resultado_clasificado": "reviewer_failed_attempt",
+        })
+        configuracion["candidatos"] = candidatos
+        ejecucion.configuracion_calidad = configuracion
+        ejecucion.estado = "generando"
+        ejecucion.mensaje = (
+            f"Falló la revisión {rol_legible}; intento {intento.numero} contabilizado como perdido. "
+            "El Quality Loop continuará con los intentos restantes."
+        )
+        sesion.commit()
+
+
+def _actualizar_mensaje_ejecucion(ejecucion_id: str, mensaje: str) -> None:
+    """Publica el paso actual para que la interfaz pueda seguir llamadas prolongadas."""
+    with crear_sesion() as sesion:
+        ejecucion = sesion.get(Ejecucion, ejecucion_id)
+        if ejecucion and ejecucion.estado == "generando":
+            ejecucion.mensaje = mensaje[:1000]
+            sesion.commit()
+
+
 def _consulta_evaluador(resultado_cad: dict, plan: dict, caso_id: str | None) -> dict:
     solicitud = {
         "archivos": resultado_cad["archivos"],
@@ -184,6 +299,57 @@ def _consulta_evaluador(resultado_cad: dict, plan: dict, caso_id: str | None) ->
         return datos
     except (ValueError, TypeError):
         raise RuntimeError("El evaluador devolvió una respuesta malformada") from None
+
+
+def _validar_plan_con_respaldo(router, descripcion: str, plan: PlanGeometrico,
+                               respuesta_plan, permitir_respaldo: bool):
+    """Usa el modelo alternativo ante cotas semánticas inválidas ya respondidas."""
+    try:
+        validar_plan_para_descripcion(descripcion, plan)
+        return plan, respuesta_plan
+    except ValueError:
+        proveedor = getattr(router, "proveedor", None)
+        llamadas = int(getattr(proveedor, "llamadas", 0) or 0)
+        if (not permitir_respaldo or llamadas >= 2
+                or getattr(respuesta_plan, "modelo", None) == NVIDIA_MODEL_PLANNER_FALLBACK):
+            raise
+    plan_alternativo, respuesta_alternativa = router.planificar_alternativo(descripcion)
+    validar_plan_para_descripcion(descripcion, plan_alternativo)
+    return plan_alternativo, respuesta_alternativa
+
+
+def _promover_candidato_tecnico(sesion, ejecucion: Ejecucion, motor: str,
+                                candidatos: list[dict]) -> dict | None:
+    """Publica los archivos del primer CAD válido aunque una revisión haya fallado."""
+    validos = sorted(
+        (c for c in candidatos if c.get("technical_success")),
+        key=lambda candidato: (int(candidato.get("iteracion", 0)),
+                               int(candidato.get("attempt_id", 0))),
+    )
+    for candidato in validos:
+        intento_id = int(candidato.get("attempt_id", 0))
+        intento = sesion.get(IntentoGeneracion, intento_id)
+        if not intento:
+            continue
+        archivos = solicitar_resultado_guardado(
+            ejecucion.identificador, candidato["candidate_id"], motor
+        )
+        if not archivos:
+            continue
+        try:
+            guardar_archivos(ejecucion.identificador, motor, intento.codigo,
+                             archivos, intento_id, sesion)
+        except (ValueError, OSError, KeyError):
+            continue
+        ejecucion.primer_exito_ejecucion = intento.numero
+        ejecucion.primer_exito_cad = intento.numero
+        ejecucion.primer_exito_exportacion = intento.numero
+        return {
+            "candidate_id": candidato["candidate_id"],
+            "attempt_id": intento_id,
+            "iteracion": int(candidato.get("iteracion", 0)),
+        }
+    return None
 
 
 def _mensajes_modelador(descripcion: str, plan: dict, motor: str, historial: dict | None,
@@ -316,7 +482,7 @@ def procesar_quality_loop(identificador: str) -> None:
             "maximo_llamadas_ia": MAXIMO_LLAMADAS_QUALITY_LOOP,
             "maximo_tokens_presupuestados": MAXIMO_TOKENS_QUALITY_LOOP,
             "maximo_tokens_salida_generador": MAXIMO_TOKENS_SALIDA_QUALITY_GENERADOR,
-            "version_configuracion": "ciel-nvidia-routing-v1",
+            "version_configuracion": "ciel-nvidia-routing-v2",
             "modelos_por_rol": catalogo_roles(),
             "llamadas_ia": 0, "estado_protocolo": "planificando",
             "tokens_presupuestados": 0,
@@ -374,14 +540,52 @@ def procesar_quality_loop(identificador: str) -> None:
             "planner", respuesta_plan, getattr(respuesta_plan, "modelo", ""), "nvidia_nim"
         )
         llamada_plan["llamadas_http"] = llamadas
+        llamada_plan["modelos_intentados"] = list(
+            getattr(router, "modelos_planificador", []) or [getattr(respuesta_plan, "modelo", "")]
+        )
         llamada_plan["parametros"] = {"max_tokens": MAXIMO_TOKENS_NVIDIA, "temperature": 0}
         llamada_plan, tokens_presupuestados = _reservar_en_llamada(
             llamada_plan, reserva_plan * max(1, llamadas), tokens_presupuestados
         )
         llamadas_registradas.append(llamada_plan)
+        respuesta_plan_registrada = llamada_plan
+        llamadas_antes_validacion = proveedor.llamadas
+        inicio_validacion_plan = time.monotonic()
         try:
-            validar_plan_para_descripcion(descripcion, plan)
+            plan, respuesta_plan = _validar_plan_con_respaldo(
+                router, descripcion, plan, respuesta_plan, permitir_respaldo
+            )
+        except ErrorNvidia as error:
+            llamadas_respaldo = proveedor.llamadas - llamadas_antes_validacion
+            if llamadas_respaldo:
+                llamadas_registradas.append(_entrada_llamada_fallida(
+                    "planner_fallback", NVIDIA_MODEL_PLANNER_FALLBACK, error,
+                    time.monotonic() - inicio_validacion_plan, reserva_plan, llamadas_respaldo,
+                ))
+            with crear_sesion() as sesion:
+                ejecucion = sesion.get(Ejecucion, identificador)
+                ejecucion.estado = "bloqueada"
+                ejecucion.mensaje = "El planificador alternativo no pudo devolver un plan válido"
+                ejecucion.fecha_fin = fecha_actual()
+                config = dict(ejecucion.configuracion_calidad or {})
+                config.update({
+                    "estado_protocolo": _clasificar_fallo_proveedor(error),
+                    "error_proveedor": str(error)[:1000],
+                    "planner_models_attempted": list(getattr(router, "modelos_planificador", [])),
+                    "llamadas_ia": proveedor.llamadas,
+                    "tokens_presupuestados": reserva_plan * max(1, proveedor.llamadas),
+                    "llamadas": list(llamadas_registradas),
+                })
+                ejecucion.configuracion_calidad = config
+                sesion.commit()
+            return
         except ValueError as error:
+            llamadas_respaldo = proveedor.llamadas - llamadas_antes_validacion
+            if llamadas_respaldo:
+                llamadas_registradas.append(_entrada_llamada_fallida(
+                    "planner_fallback", NVIDIA_MODEL_PLANNER_FALLBACK, error,
+                    time.monotonic() - inicio_validacion_plan, reserva_plan, llamadas_respaldo,
+                ))
             with crear_sesion() as sesion:
                 ejecucion = sesion.get(Ejecucion, identificador)
                 ejecucion.estado = "bloqueada"
@@ -390,10 +594,26 @@ def procesar_quality_loop(identificador: str) -> None:
                 config = dict(ejecucion.configuracion_calidad or {})
                 config.update({"estado_protocolo": "plan_invalid", "planner_model": respuesta_plan.modelo,
                                "planner_provider": "nvidia_nim", "plan_error": str(error),
-                               "llamadas_ia": llamadas})
+                               "planner_models_attempted": list(getattr(router, "modelos_planificador", [])),
+                               "llamadas_ia": proveedor.llamadas,
+                               "tokens_presupuestados": reserva_plan * max(1, proveedor.llamadas),
+                               "llamadas": list(llamadas_registradas)})
                 ejecucion.configuracion_calidad = config
                 sesion.commit()
             return
+        llamadas_respaldo = proveedor.llamadas - llamadas_antes_validacion
+        if llamadas_respaldo:
+            llamada_respaldo = _entrada_llamada(
+                "planner_fallback", respuesta_plan, NVIDIA_MODEL_PLANNER_FALLBACK, "nvidia_nim"
+            )
+            llamada_respaldo["llamadas_http"] = llamadas_respaldo
+            llamada_respaldo["parametros"] = {"max_tokens": MAXIMO_TOKENS_NVIDIA, "temperature": 0}
+            llamada_respaldo, tokens_presupuestados = _reservar_en_llamada(
+                llamada_respaldo, reserva_plan * llamadas_respaldo, tokens_presupuestados
+            )
+            llamadas_registradas.append(llamada_respaldo)
+            respuesta_plan_registrada = llamada_respaldo
+            llamadas = proveedor.llamadas
         plan_json = _json(plan)
         with crear_sesion() as sesion:
             ejecucion = sesion.get(Ejecucion, identificador)
@@ -404,7 +624,7 @@ def procesar_quality_loop(identificador: str) -> None:
                 "planner_model": respuesta_plan.modelo,
                 "planner_provider": respuesta_plan.proveedor,
                 "planner_endpoint_logico": "chat/completions",
-                "planner_response": llamada_plan,
+                "planner_response": respuesta_plan_registrada,
                 "llamadas_ia": llamadas,
                 "tokens_presupuestados": tokens_presupuestados,
                 "llamadas": list(llamadas_registradas),
@@ -421,9 +641,11 @@ def procesar_quality_loop(identificador: str) -> None:
         contador_intento = 0
         informes_por_iteracion: list[list[tuple[int, dict]]] = []
         detener_por_infraestructura = False
+        intentos_perdidos_revisor = 0
 
         for iteracion in range(1, MAXIMO_ITERACIONES_QUALITY_LOOP + 1):
             resultados_iteracion = []
+            intentos_perdidos_iteracion = 0
             if llamadas >= MAXIMO_LLAMADAS_QUALITY_LOOP:
                 break
             with crear_sesion() as sesion:
@@ -483,6 +705,10 @@ def procesar_quality_loop(identificador: str) -> None:
                     config["llamadas_ia"] = llamadas
                     ejecucion.configuracion_calidad = config
                     sesion.commit()
+                _actualizar_mensaje_ejecucion(
+                    identificador,
+                    f"Quality Loop: generando intento {contador_intento} de {MAXIMO_ITERACIONES_QUALITY_LOOP}",
+                )
                 try:
                     limite_salida = (MAXIMO_TOKENS_SALIDA_QUALITY_GENERADOR
                                      if modelo in MODELOS_DISPONIBLES else None)
@@ -554,24 +780,42 @@ def procesar_quality_loop(identificador: str) -> None:
                         static_error = "El presupuesto de llamadas o tokens se agotó antes del code reviewer obligatorio"
                     else:
                         antes = proveedor.llamadas
+                        inicio_revisor = time.monotonic()
+                        _actualizar_mensaje_ejecucion(
+                            identificador, f"Revisor de código: esperando respuesta para el intento {contador_intento}"
+                        )
                         try:
                             revision_codigo, respuesta_revisor = router.revisar_codigo(motor, plan, codigo)
                         except (ErrorNvidia, Exception) as error:
                             incremento = max(1, proveedor.llamadas - antes)
                             llamadas += incremento
-                            tokens_presupuestados += reserva_revisor * incremento
-                            with crear_sesion() as sesion:
-                                ejecucion = sesion.get(Ejecucion, identificador)
-                                config = dict(ejecucion.configuracion_calidad or {})
-                                config.update({"llamadas_ia": llamadas,
-                                               "tokens_presupuestados": tokens_presupuestados})
-                                ejecucion.configuracion_calidad = config
-                                sesion.commit()
-                            _registrar_fallo_proveedor(identificador, intento_id, "code_reviewer", error,
-                                {"iteracion": iteracion, "candidate_id": candidate_id,
-                                 "parent_candidate_id": parent_id})
-                            detener_por_infraestructura = True
-                            break
+                            reserva_fallida = reserva_revisor * incremento
+                            tokens_presupuestados += reserva_fallida
+                            llamada_fallida = _entrada_llamada_fallida(
+                                "code_reviewer", catalogo_roles()["revisor_codigo"]["modelo"], error,
+                                time.monotonic() - inicio_revisor, reserva_revisor, incremento,
+                            )
+                            llamadas_registradas.append(llamada_fallida)
+                            detalle_error = f"El revisor de código falló ({_clasificar_fallo_proveedor(error)})."
+                            informe_fallido = {
+                                "iteracion": iteracion, "candidate_id": candidate_id,
+                                "parent_candidate_id": parent_id, "technical_success": False,
+                                "quality_success": False, "quality_score": None,
+                                "code_review": {"estado": "error_proveedor"},
+                                "provider_calls": [llamada_generador, llamada_fallida],
+                                "errores": [detalle_error], "preserved_features": [],
+                                "repair_priority": [],
+                                "reference_protocol": "quality-v2-reference-authorized"
+                                    if QUALITY_ALLOW_REFERENCE_METRICS and caso_id else "no-reference",
+                            }
+                            _registrar_fallo_revisor(
+                                identificador, intento_id, "code_reviewer", error, informe_fallido,
+                                llamada_fallida, llamadas, tokens_presupuestados,
+                                llamadas_registradas,
+                            )
+                            intentos_perdidos_iteracion += 1
+                            intentos_perdidos_revisor += 1
+                            continue
                         incremento = proveedor.llamadas - antes
                         llamadas += max(1, incremento)
                         info_revisor = _entrada_llamada("code_reviewer", respuesta_revisor,
@@ -608,7 +852,7 @@ def procesar_quality_loop(identificador: str) -> None:
                         estado_intento = "invalido"
                         fase_error = "revisor_codigo"
                         candidato["resultado_clasificado"] = "review_rejected"
-                        diagnostico = "Laguna rechazó el código antes de ejecutar el runtime CAD"
+                        diagnostico = "El revisor de código rechazó el programa antes de ejecutar el CAD"
                         candidato["errores"].append(diagnostico)
                 else:
                     bloquea = True
@@ -617,6 +861,9 @@ def procesar_quality_loop(identificador: str) -> None:
                 if not bloquea:
                     inicio_cad = time.monotonic()
                     try:
+                        _actualizar_mensaje_ejecucion(
+                            identificador, f"Supervisor CAD: ejecutando el intento {contador_intento}"
+                        )
                         resultado_cad = solicitar_ejecucion_cad(motor, codigo)
                     except RuntimeError as error:
                         diagnostico = str(error)[:1000]
@@ -636,6 +883,10 @@ def procesar_quality_loop(identificador: str) -> None:
                         candidato["technical_success"] = tecnico
                         if tecnico:
                             try:
+                                _actualizar_mensaje_ejecucion(
+                                    identificador,
+                                    f"Evaluador geométrico: midiendo el intento {contador_intento}",
+                                )
                                 inspeccion = _consulta_evaluador(resultado_cad, plan_json, caso_id)
                             except (httpx.HTTPError, RuntimeError) as error:
                                 if isinstance(error, httpx.HTTPStatusError) and error.response.status_code < 500:
@@ -673,6 +924,11 @@ def procesar_quality_loop(identificador: str) -> None:
                                     diagnostico = candidato["quality_gate"]["motivo"]
                                 else:
                                     antes = proveedor.llamadas
+                                    inicio_revisor = time.monotonic()
+                                    _actualizar_mensaje_ejecucion(
+                                        identificador,
+                                        f"Revisor visual: esperando respuesta para el intento {contador_intento}",
+                                    )
                                     try:
                                         revision_visual, respuesta_visual = router.revisar_visual(
                                             descripcion, plan, geometria, imagen
@@ -681,19 +937,39 @@ def procesar_quality_loop(identificador: str) -> None:
                                         incremento = max(1, proveedor.llamadas - antes)
                                         llamadas += incremento
                                         tokens_presupuestados += reserva_visual * incremento
-                                        with crear_sesion() as sesion:
-                                            ejecucion = sesion.get(Ejecucion, identificador)
-                                            config = dict(ejecucion.configuracion_calidad or {})
-                                            config.update({"llamadas_ia": llamadas,
-                                                           "tokens_presupuestados": tokens_presupuestados})
-                                            ejecucion.configuracion_calidad = config
-                                            sesion.commit()
-                                        _registrar_fallo_proveedor(identificador, intento_id,
-                                            "visual_reviewer", error,
-                                            {"iteracion": iteracion, "candidate_id": candidate_id,
-                                             "parent_candidate_id": parent_id})
-                                        detener_por_infraestructura = True
-                                        break
+                                        llamada_fallida = _entrada_llamada_fallida(
+                                            "visual_reviewer", catalogo_roles()["revisor_visual"]["modelo"],
+                                            error, time.monotonic() - inicio_revisor,
+                                            reserva_visual, incremento,
+                                        )
+                                        llamadas_registradas.append(llamada_fallida)
+                                        candidato.update({
+                                            "technical_success": True,
+                                            "technical_result": {
+                                                "sintaxis_valida": resultado_cad.get("sintaxis_valida"),
+                                                "ejecucion_correcta": resultado_cad.get("ejecucion_correcta"),
+                                                "cad_valido": resultado_cad.get("cad_valido"),
+                                                "exportacion_valida": resultado_cad.get("exportacion_valida"),
+                                                "volumen_mm3": resultado_cad.get("volumen_mm3"),
+                                                "fase_error": resultado_cad.get("fase_error"),
+                                                "diagnostico": resultado_cad.get("diagnostico", ""),
+                                            },
+                                            "quality_metrics": metricas,
+                                            "visual_review": {"estado": "error_proveedor"},
+                                            "quality_gate": {"accepted": False, "quality_success": False,
+                                                "motivo": "El revisor visual falló; intento perdido."},
+                                            "resultado_clasificado": "reviewer_failed_attempt",
+                                        })
+                                        candidato["provider_calls"].append(llamada_fallida)
+                                        _registrar_fallo_revisor(
+                                            identificador, intento_id, "visual_reviewer", error,
+                                            candidato, llamada_fallida, llamadas,
+                                            tokens_presupuestados, llamadas_registradas, resultado_cad,
+                                            motor=motor, codigo=codigo, imagen=imagen,
+                                        )
+                                        intentos_perdidos_iteracion += 1
+                                        intentos_perdidos_revisor += 1
+                                        continue
                                     llamadas += max(1, proveedor.llamadas - antes)
                                     info_visual = _entrada_llamada("visual_reviewer", respuesta_visual,
                                         respuesta_visual.modelo, "nvidia_nim")
@@ -733,25 +1009,51 @@ def procesar_quality_loop(identificador: str) -> None:
                                         respuesta_critica = None
                                     else:
                                         antes = proveedor.llamadas
+                                        inicio_revisor = time.monotonic()
+                                        _actualizar_mensaje_ejecucion(
+                                            identificador,
+                                            f"Crítico geométrico: esperando respuesta para el intento {contador_intento}",
+                                        )
                                         try:
                                             critica, respuesta_critica = router.criticar(plan, evidencia_critico)
                                         except (ErrorNvidia, Exception) as error:
                                             incremento = max(1, proveedor.llamadas - antes)
                                             llamadas += incremento
                                             tokens_presupuestados += reserva_critica * incremento
-                                            with crear_sesion() as sesion:
-                                                ejecucion = sesion.get(Ejecucion, identificador)
-                                                config = dict(ejecucion.configuracion_calidad or {})
-                                                config.update({"llamadas_ia": llamadas,
-                                                               "tokens_presupuestados": tokens_presupuestados})
-                                                ejecucion.configuracion_calidad = config
-                                                sesion.commit()
-                                            _registrar_fallo_proveedor(identificador, intento_id,
-                                                "geometric_critic", error,
-                                                {"iteracion": iteracion, "candidate_id": candidate_id,
-                                                 "parent_candidate_id": parent_id})
-                                            detener_por_infraestructura = True
-                                            break
+                                            llamada_fallida = _entrada_llamada_fallida(
+                                                "geometric_critic", catalogo_roles()["juez_textual"]["modelo"],
+                                                error, time.monotonic() - inicio_revisor,
+                                                reserva_critica, incremento,
+                                            )
+                                            llamadas_registradas.append(llamada_fallida)
+                                            candidato.update({
+                                                "technical_success": True,
+                                                "technical_result": {
+                                                    "sintaxis_valida": resultado_cad.get("sintaxis_valida"),
+                                                    "ejecucion_correcta": resultado_cad.get("ejecucion_correcta"),
+                                                    "cad_valido": resultado_cad.get("cad_valido"),
+                                                    "exportacion_valida": resultado_cad.get("exportacion_valida"),
+                                                    "volumen_mm3": resultado_cad.get("volumen_mm3"),
+                                                    "fase_error": resultado_cad.get("fase_error"),
+                                                    "diagnostico": resultado_cad.get("diagnostico", ""),
+                                                },
+                                                "quality_metrics": metricas,
+                                                "visual_review": _json(revision_visual),
+                                                "critic_review": {"estado": "error_proveedor"},
+                                                "quality_gate": {"accepted": False, "quality_success": False,
+                                                    "motivo": "El crítico geométrico falló; intento perdido."},
+                                                "resultado_clasificado": "reviewer_failed_attempt",
+                                            })
+                                            candidato["provider_calls"].append(llamada_fallida)
+                                            _registrar_fallo_revisor(
+                                                identificador, intento_id, "geometric_critic", error,
+                                                candidato, llamada_fallida, llamadas,
+                                                tokens_presupuestados, llamadas_registradas, resultado_cad,
+                                                motor=motor, codigo=codigo, imagen=imagen,
+                                            )
+                                            intentos_perdidos_iteracion += 1
+                                            intentos_perdidos_revisor += 1
+                                            continue
                                         llamadas += max(1, proveedor.llamadas - antes)
                                     if critica is not None:
                                         info_critica = _entrada_llamada("geometric_critic", respuesta_critica,
@@ -866,6 +1168,8 @@ def procesar_quality_loop(identificador: str) -> None:
             if detener_por_infraestructura:
                 return
             if not resultados_iteracion:
+                if intentos_perdidos_iteracion:
+                    continue
                 break
             informes_por_iteracion.append(resultados_iteracion)
             elegibles = _ordenar_candidatos(resultados_iteracion)
@@ -897,12 +1201,33 @@ def procesar_quality_loop(identificador: str) -> None:
             with crear_sesion() as sesion:
                 ejecucion = sesion.get(Ejecucion, identificador)
                 ejecucion.estado = "fallida"
-                ejecucion.mensaje = "El límite de llamadas IA no permitió completar un candidato"
+                if intentos_perdidos_revisor:
+                    ejecucion.mensaje = (
+                        f"Se agotaron los {MAXIMO_ITERACIONES_QUALITY_LOOP} ciclos; "
+                        f"{intentos_perdidos_revisor} intentos se perdieron por fallos de revisores."
+                    )
+                else:
+                    ejecucion.mensaje = "El límite de llamadas IA no permitió completar un candidato"
                 ejecucion.fecha_fin = fecha_actual()
                 config = dict(ejecucion.configuracion_calidad or {})
-                config.update({"estado_protocolo": "budget_exhausted", "llamadas_ia": llamadas,
+                config.update({"estado_protocolo": "reviewer_attempts_exhausted"
+                                   if intentos_perdidos_revisor else "budget_exhausted",
+                               "quality_success": False,
+                               "technical_success": any(c.get("technical_success")
+                                                         for c in config.get("candidatos", [])),
+                               "llamadas_ia": llamadas,
                                "llamadas": llamadas_registradas,
                                "tokens_presupuestados": tokens_presupuestados})
+                candidato_tecnico = _promover_candidato_tecnico(
+                    sesion, ejecucion, motor, config.get("candidatos", [])
+                )
+                if candidato_tecnico:
+                    config["candidato_tecnico_sin_revision"] = candidato_tecnico
+                    ejecucion.mensaje = (
+                        f"Se agotaron los ciclos; {intentos_perdidos_revisor} intentos se perdieron "
+                        "por fallos de revisores. "
+                        "Se conserva el CAD técnicamente válido, pero Quality Gate no fue aceptado."
+                    )
                 ejecucion.configuracion_calidad = config
                 sesion.commit()
             return
@@ -911,6 +1236,23 @@ def procesar_quality_loop(identificador: str) -> None:
             bool(item[2].get("quality_success")), bool(item[2].get("technical_success")),
             float(item[2].get("quality_score") or -1),
         ), reverse=True)[0]
+        if not ganador.get("technical_success"):
+            with crear_sesion() as sesion:
+                ejecucion_actual = sesion.get(Ejecucion, identificador)
+                candidatos_tecnicos = sorted(
+                    (c for c in (ejecucion_actual.configuracion_calidad or {}).get("candidatos", [])
+                     if c.get("technical_success")),
+                    key=lambda candidato: int(candidato.get("attempt_id", 0)),
+                )
+                for candidato in candidatos_tecnicos:
+                    informe_tecnico = sesion.scalar(select(InformeCalidad).where(
+                        InformeCalidad.intento_identificador == candidato.get("attempt_id")
+                    ))
+                    if informe_tecnico:
+                        final_iteracion = int(candidato.get("iteracion", final_iteracion))
+                        final_intento_id = int(candidato["attempt_id"])
+                        ganador = dict(informe_tecnico.resultado)
+                        break
         with crear_sesion() as sesion:
             ganador_informe = sesion.scalar(select(InformeCalidad).where(
                 InformeCalidad.intento_identificador == final_intento_id
@@ -942,14 +1284,24 @@ def procesar_quality_loop(identificador: str) -> None:
             ejecucion.mensaje = (
                 f"CAD aceptado por Quality Gate (puntuación {ganador.get('quality_score'):.3f})"
                 if aceptado and ganador.get("quality_score") is not None else
+                "CAD técnicamente válido, pero falló un revisor obligatorio y el intento se perdió; Quality Gate no fue aceptado"
+                if ganador.get("resultado_clasificado") == "reviewer_failed_attempt" else
                 "CAD técnicamente válido, pero rechazado por Quality Gate" if ganador.get("technical_success") else
                 "No se obtuvo un candidato CAD técnicamente válido"
             )
             ejecucion.fecha_fin = fecha_actual()
             config = dict(ejecucion.configuracion_calidad or {})
-            config.update({"estado_protocolo": "quality_accepted" if aceptado else "quality_rejected",
+            estado_protocolo = (
+                "quality_accepted" if aceptado else
+                "reviewer_attempts_exhausted"
+                if ganador.get("resultado_clasificado") == "reviewer_failed_attempt" else
+                "quality_rejected"
+            )
+            config.update({"estado_protocolo": estado_protocolo,
                 "quality_success": aceptado,
-                "technical_success": bool(ganador.get("technical_success")),
+                "technical_success": bool(ganador.get("technical_success") or any(
+                    c.get("technical_success") for c in config.get("candidatos", [])
+                )),
                 "quality_score": ganador.get("quality_score"),
                 "quality_gate": ganador.get("quality_gate"),
                 "ganador_candidate_id": ganador.get("candidate_id"),

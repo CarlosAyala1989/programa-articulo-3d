@@ -13,7 +13,9 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from aplicacion.api import consultar_opciones
-from aplicacion.base_datos import BaseDeclarativa, Ejecucion, InformeCalidad, IntentoGeneracion
+from aplicacion.base_datos import (
+    ArchivoGenerado, BaseDeclarativa, Ejecucion, InformeCalidad, IntentoGeneracion,
+)
 from aplicacion.calidad import flujo
 from aplicacion.calidad.metricas import evaluar_quality_gate, preparar_metricas
 from aplicacion.calidad.modelos import (
@@ -23,8 +25,10 @@ from aplicacion.calidad.modelos import (
 from aplicacion.calidad.nvidia import ErrorNvidia, ProveedorNvidia, RouterModelos
 from aplicacion.calidad.prompts import instruccion_modeler, validar_plan_para_descripcion
 from aplicacion.calidad.recipes import seleccionar_recipes, texto_recipes
+from aplicacion.proveedores import solicitar_codigo
 from aplicacion.configuracion import (
     MODELOS_NVIDIA_GENERADORES, NVIDIA_MODEL_CODE_REVIEWER, NVIDIA_MODEL_GENERATOR,
+    NVIDIA_MODEL_PLANNER, NVIDIA_MODEL_PLANNER_FALLBACK, NVIDIA_MODEL_VISUAL_REVIEWER,
 )
 from aplicacion.generacion import revisar_codigo
 
@@ -63,6 +67,29 @@ class GeometricPlanTests(unittest.TestCase):
         plan.dimensiones_globales["x"] = dimension(90)
         with self.assertRaisesRegex(ValueError, "alteró o inventó"):
             validar_plan_para_descripcion("Placa de 100 x 60 x 10 mm", plan)
+
+    def test_plan_semanticamente_invalido_usa_alternativo_una_sola_vez(self):
+        plan_invalido = plan_mecanico()
+        plan_invalido.dimensiones_globales["x"] = dimension(90)
+
+        class RouterFalso:
+            def __init__(self):
+                self.proveedor = SimpleNamespace(llamadas=1)
+                self.alternativas = 0
+
+            def planificar_alternativo(self, descripcion):
+                self.alternativas += 1
+                self.proveedor.llamadas += 1
+                return plan_mecanico(), respuesta(modelo="moonshotai/kimi-k3")
+
+        router = RouterFalso()
+        plan, llamada = flujo._validar_plan_con_respaldo(
+            router, "Placa de 100 x 60 x 10 mm", plan_invalido,
+            respuesta(modelo="nvidia/nemotron-3-super-120b-a12b"), True,
+        )
+        self.assertEqual(router.alternativas, 1)
+        self.assertEqual(plan.bounding_box_esperada.x.valor, 100)
+        self.assertEqual(llamada.modelo, "moonshotai/kimi-k3")
 
     def test_conserva_cantidad_especificada_escrita_con_palabras(self):
         plan = plan_mecanico()
@@ -186,7 +213,7 @@ class RouterModelTests(unittest.TestCase):
             RouterModelos(proveedor).planificar("Placa de 100 x 60 x 10 mm")
         self.assertEqual(proveedor.llamadas, 1)
 
-    def test_planificador_usa_super_tras_json_invalido_completado(self):
+    def test_planificador_usa_alternativo_tras_json_invalido_completado(self):
         class ProveedorFalso:
             def __init__(self):
                 self.modelos = []
@@ -203,6 +230,7 @@ class RouterModelTests(unittest.TestCase):
             "Placa de 100 x 60 x 10 mm", permitir_fallback=True
         )
         self.assertEqual(plan.clase_modelado, "MECHANICAL_PRECISE")
+        self.assertEqual(proveedor.modelos, [NVIDIA_MODEL_PLANNER, NVIDIA_MODEL_PLANNER_FALLBACK])
         self.assertEqual(respuesta_plan.modelo, proveedor.modelos[1])
         self.assertNotEqual(proveedor.modelos[0], proveedor.modelos[1])
 
@@ -213,6 +241,8 @@ class NvidiaProviderTests(unittest.TestCase):
             opciones = consultar_opciones()
         self.assertEqual(opciones["quality_loop"]["modelo_nvidia_generador"], NVIDIA_MODEL_GENERATOR)
         self.assertIn("nvidia/nemotron-3-super-120b-a12b", opciones["modelos"])
+        self.assertIn("moonshotai/kimi-k3", opciones["modelos"])
+        self.assertNotIn("nvidia/nemotron-3-ultra-550b-a55b", opciones["modelos"])
         for modelo in MODELOS_NVIDIA_GENERADORES:
             self.assertIn(modelo, opciones["modelos"])
         if NVIDIA_MODEL_GENERATOR != "deepseek-ai/deepseek-v4.1-flash":
@@ -259,6 +289,80 @@ class NvidiaProviderTests(unittest.TestCase):
         with patch("aplicacion.calidad.nvidia.httpx.Client", return_value=cliente):
             with self.assertRaisesRegex(ErrorNvidia, "malformada"):
                 proveedor.generar("poolside/laguna-xs-2.1", [{"role": "user", "content": "x"}])
+
+    def test_nemotron_envia_esfuerzo_razonamiento_compatible_con_cada_modelo(self):
+        for modelo, esfuerzo in (
+            ("nvidia/nemotron-3-super-120b-a12b", "low"),
+            ("nvidia/nemotron-3-ultra-550b-a55b", "medium"),
+            ("moonshotai/kimi-k3", None),
+        ):
+            with self.subTest(modelo=modelo):
+                proveedor = ProveedorNvidia(clave="clave-prueba-no-real")
+                cliente = MagicMock()
+                cliente.__enter__.return_value = cliente
+                cliente.post.return_value.status_code = 200
+                cliente.post.return_value.json.return_value = {
+                    "model": modelo,
+                    "choices": [{"message": {"content": plan_mecanico().model_dump_json()},
+                                 "finish_reason": "stop"}],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+                }
+                with patch("aplicacion.calidad.nvidia.httpx.Client", return_value=cliente):
+                    proveedor.generar_estructurado(modelo, "sistema", "solicitud", PlanGeometrico)
+                cuerpo = cliente.post.call_args.kwargs["json"]
+                self.assertEqual(cuerpo.get("reasoning_effort"), esfuerzo)
+
+    def test_generador_nvidia_usa_esfuerzo_bajo_o_medio_y_lo_registra(self):
+        for modelo, esfuerzo in (
+            ("nvidia/nemotron-3-super-120b-a12b", "low"),
+            ("nvidia/nemotron-3-ultra-550b-a55b", "medium"),
+            ("moonshotai/kimi-k3", None),
+        ):
+            with self.subTest(modelo=modelo), patch(
+                "aplicacion.proveedores.ProveedorNvidia"
+            ) as constructor:
+                proveedor = constructor.return_value
+                proveedor.generar.return_value = respuesta("import cadquery as cq", modelo)
+                resultado = solicitar_codigo(modelo, [{"role": "user", "content": "Pieza"}])
+                self.assertEqual(proveedor.generar.call_args.kwargs["esfuerzo_razonamiento"], esfuerzo)
+                self.assertEqual(resultado["perfil"]["reasoning_effort"], esfuerzo)
+
+    def test_revisor_visual_envia_imagen_y_esquema_estructurado(self):
+        proveedor = ProveedorNvidia(clave="clave-prueba-no-real")
+        cliente = MagicMock()
+        cliente.__enter__.return_value = cliente
+        cliente.post.return_value.status_code = 200
+        revision = RevisionVisual(
+            accepted=True, puntuacion_silueta=0.9,
+            puntuacion_proporciones=0.9, puntuacion_features=0.9,
+        )
+        cliente.post.return_value.json.return_value = {
+            "model": NVIDIA_MODEL_VISUAL_REVIEWER,
+            "choices": [{"message": {"content": revision.model_dump_json()}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+        }
+        imagen = b"\x89PNG\r\n\x1a\nimagen-prueba"
+        with patch("aplicacion.calidad.nvidia.httpx.Client", return_value=cliente):
+            resultado, _ = RouterModelos(proveedor).revisar_visual(
+                "placa", plan_mecanico(), {}, imagen
+            )
+        cuerpo = cliente.post.call_args.kwargs["json"]
+        usuario = cuerpo["messages"][1]["content"]
+        self.assertTrue(resultado.accepted)
+        self.assertEqual(cuerpo["model"], NVIDIA_MODEL_VISUAL_REVIEWER)
+        self.assertEqual(usuario[1]["type"], "image_url")
+        self.assertIn("puntuacion_silueta", usuario[0]["text"])
+
+    def test_revision_acepta_alias_ingles_errors_y_normaliza_espanol(self):
+        critica = CriticaGeometrica.model_validate({"accepted": False, "errors": []})
+        visual = RevisionVisual.model_validate({
+            "accepted": False, "puntuacion_silueta": 0.5,
+            "puntuacion_proporciones": 0.5, "puntuacion_features": 0.5,
+            "errors": [],
+        })
+        self.assertIn("errores", critica.model_dump())
+        self.assertNotIn("errors", critica.model_dump())
+        self.assertEqual(visual.errores, [])
 
     def test_modelo_nvidia_fuera_de_allowlist(self):
         with self.assertRaisesRegex(ErrorNvidia, "no permitido"):
@@ -415,6 +519,127 @@ class QualityGateTests(unittest.TestCase):
 
 
 class QualityLoopIntegrationTests(unittest.TestCase):
+    def test_fallo_de_cualquier_revisor_consume_intento_y_el_loop_continua(self):
+        for rol_fallido in ("code_reviewer", "visual_reviewer", "geometric_critic"):
+            with self.subTest(rol=rol_fallido):
+                motor_db = create_engine("sqlite://", connect_args={"check_same_thread": False},
+                                         poolclass=StaticPool)
+                BaseDeclarativa.metadata.create_all(motor_db)
+                Sesiones = sessionmaker(bind=motor_db, expire_on_commit=False)
+                ejecucion_id = f"{len(rol_fallido):08d}-1111-4111-8111-111111111111"
+                with Sesiones() as sesion:
+                    sesion.add(Ejecucion(
+                        identificador=ejecucion_id,
+                        descripcion="Placa de 100 x 60 x 10 mm", motor="cadquery",
+                        modelo="deepseek-v4-pro", modo="quality-loop", maximo_intentos=3,
+                        estado="pendiente", mensaje="En cola",
+                        configuracion_calidad={"best_of_n": False},
+                    ))
+                    sesion.commit()
+
+                proveedor_fake = SimpleNamespace(llamadas=0)
+
+                class RouterFalso:
+                    def __init__(self, proveedor):
+                        self.proveedor = proveedor
+
+                    def _comprobar_fallo(self, rol):
+                        self.proveedor.llamadas += 1
+                        if rol == rol_fallido:
+                            raise ErrorNvidia(f"Timeout simulado en {rol}", "timeout")
+                        return respuesta(modelo="nvidia/nemotron-3-super-120b-a12b")
+
+                    def planificar(self, descripcion, permitir_fallback=True):
+                        self.proveedor.llamadas += 1
+                        return plan_mecanico(), respuesta(modelo="nvidia/nemotron-3-ultra-550b-a55b")
+
+                    def revisar_codigo(self, motor, plan, codigo):
+                        llamada = self._comprobar_fallo("code_reviewer")
+                        return RevisionCodigo(accepted=True, severity="none"), llamada
+
+                    def revisar_visual(self, descripcion, plan, metricas, imagen):
+                        llamada = self._comprobar_fallo("visual_reviewer")
+                        return (RevisionVisual(accepted=True, puntuacion_silueta=0.98,
+                                puntuacion_proporciones=0.98, puntuacion_features=0.98), llamada)
+
+                    def criticar(self, plan, evidencia):
+                        llamada = self._comprobar_fallo("geometric_critic")
+                        return CriticaGeometrica(accepted=True, preservar=["cuerpo"],
+                            prioridad_reparacion=[]), llamada
+
+                llamadas_generacion = []
+
+                def generar(modelo, mensajes, esfuerzo, maximo_tokens=None):
+                    llamadas_generacion.append(mensajes)
+                    return {"texto": "import cadquery as cq\nresultado = cq.Workplane('XY').box(100, 60, 10)",
+                        "modelo_informado": modelo, "tokens_entrada": 100, "tokens_salida": 40,
+                        "finalizacion": "stop", "proveedor": "deepseek", "perfil": {"max_tokens": 1000}}
+
+                png = base64.b64encode(b"\x89PNG\r\n\x1a\nmock").decode("ascii")
+                inspeccion = {"technical_success": True, "geometric_metrics": {
+                    "technical_success": True, "brep_valido": True, "solidos": 1,
+                    "watertight": True, "dang_el": 0,
+                    "bounding_box_mm": {"x": 100, "y": 60, "z": 10}, "features": {},
+                    "symmetry": {"estado": "not_applicable", "valor": None}},
+                    "reference_metrics": {"estado": "not_available"},
+                    "multiview_png_base64": png}
+                resultado_cad = {"correcto": True, "sintaxis_valida": True,
+                    "ejecucion_correcta": True, "cad_valido": True, "exportacion_valida": True,
+                    "runtime_identificador": "cadquery-test", "volumen_mm3": 60000,
+                    "archivos": {"pieza.stl": "U1RMLW1vY2s=", "pieza.step": "U1RFUC1tb2Nr"}}
+
+                with tempfile.TemporaryDirectory() as directorio:
+                    with patch("aplicacion.calidad.flujo.crear_sesion", Sesiones), \
+                         patch("aplicacion.calidad.flujo.ProveedorNvidia", return_value=proveedor_fake), \
+                         patch("aplicacion.calidad.flujo.RouterModelos", RouterFalso), \
+                         patch("aplicacion.calidad.flujo.solicitar_codigo", side_effect=generar), \
+                         patch("aplicacion.calidad.flujo.solicitar_ejecucion_cad",
+                               return_value=resultado_cad) as runtime, \
+                         patch("aplicacion.calidad.flujo._consulta_evaluador",
+                               return_value=inspeccion), \
+                         patch("aplicacion.calidad.flujo.DIRECTORIO_ARTEFACTOS", directorio):
+                        flujo.procesar_quality_loop(ejecucion_id)
+
+                with Sesiones() as sesion:
+                    ejecucion = sesion.get(Ejecucion, ejecucion_id)
+                    intentos = list(sesion.scalars(select(IntentoGeneracion).where(
+                        IntentoGeneracion.ejecucion_identificador == ejecucion_id
+                    ).order_by(IntentoGeneracion.numero)))
+                    informes = list(sesion.scalars(select(InformeCalidad).where(
+                        InformeCalidad.ejecucion_identificador == ejecucion_id
+                    ).order_by(InformeCalidad.iteracion)))
+                    archivos_guardados = list(sesion.scalars(select(ArchivoGenerado).where(
+                        ArchivoGenerado.ejecucion_identificador == ejecucion_id
+                    )))
+                    self.assertEqual(ejecucion.estado, "fallida")
+                    self.assertEqual(ejecucion.numero_intentos, 3)
+                    self.assertEqual(ejecucion.configuracion_calidad["estado_protocolo"],
+                                     "reviewer_attempts_exhausted")
+                    self.assertEqual(len(llamadas_generacion), 3)
+                    self.assertEqual(len(intentos), 3)
+                    self.assertEqual(len(informes), 3)
+                    self.assertTrue(all(i.estado == "error_proveedor" for i in intentos))
+                    self.assertTrue(all(i.fase_error == "proveedor" for i in intentos))
+                    self.assertTrue(all(i.solicitud_modelo["fallo_revisor"]["rol"] == rol_fallido
+                                        for i in intentos))
+                    self.assertTrue(all(i.resultado["resultado_clasificado"] == "reviewer_failed_attempt"
+                                        for i in informes))
+                    self.assertEqual(len(ejecucion.configuracion_calidad["errores_revisores"]), 3)
+                    self.assertIn("3 intentos se perdieron", ejecucion.mensaje)
+                    self.assertFalse(ejecucion.configuracion_calidad["quality_success"])
+                    if rol_fallido == "code_reviewer":
+                        self.assertFalse(ejecucion.configuracion_calidad["technical_success"])
+                        self.assertFalse(archivos_guardados)
+                    else:
+                        self.assertTrue(ejecucion.configuracion_calidad["technical_success"])
+                        self.assertIn("pieza.stl", {archivo.nombre for archivo in archivos_guardados})
+                        self.assertIsNotNone(ejecucion.primer_exito_cad)
+                if rol_fallido == "code_reviewer":
+                    runtime.assert_not_called()
+                else:
+                    self.assertEqual(runtime.call_count, 3)
+                motor_db.dispose()
+
     def test_quality_loop_agota_tres_ciclos_si_laguna_rechaza_cada_candidato(self):
         motor_db = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
         BaseDeclarativa.metadata.create_all(motor_db)

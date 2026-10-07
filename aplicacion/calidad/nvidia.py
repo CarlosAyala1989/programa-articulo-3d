@@ -77,7 +77,8 @@ class ProveedorNvidia:
         self.llamadas = 0
 
     def generar(self, modelo: str, mensajes: list[dict], maximo_tokens: int = 8192,
-                temperatura: float = 0.1, imagenes_png: list[bytes] | None = None) -> RespuestaNvidia:
+                temperatura: float = 0.1, imagenes_png: list[bytes] | None = None,
+                esfuerzo_razonamiento: str | None = None) -> RespuestaNvidia:
         if not self._clave:
             raise ErrorNvidia("NVIDIA_API_KEY no está configurada en el backend")
         if modelo not in MODELOS_NVIDIA_REGISTRADOS:
@@ -99,6 +100,8 @@ class ProveedorNvidia:
             mensajes_solicitud[indice_usuario]["content"] = contenido
         cuerpo = {"model": modelo, "messages": mensajes_solicitud, "stream": False,
                   "max_tokens": maximo_tokens, "temperature": temperatura}
+        if esfuerzo_razonamiento:
+            cuerpo["reasoning_effort"] = esfuerzo_razonamiento
         inicio = time.monotonic()
         self.llamadas += 1
         try:
@@ -134,14 +137,48 @@ class ProveedorNvidia:
         )
 
     def generar_estructurado(self, modelo: str, sistema: str, solicitud: str,
-                             esquema: type[BaseModel], maximo_tokens: int = 8192):
+                             esquema: type[BaseModel], maximo_tokens: int = 8192,
+                             imagenes_png: list[bytes] | None = None):
         mensajes = [{"role": "system", "content": sistema},
                     {"role": "user", "content": solicitud + "\n\nESQUEMA JSON:\n" + json.dumps(esquema.model_json_schema(), ensure_ascii=False)}]
-        respuesta = self.generar(modelo, mensajes, maximo_tokens=maximo_tokens, temperatura=0)
+        esfuerzo_razonamiento = {
+            "nvidia/nemotron-3-super-120b-a12b": "low",
+            "nvidia/nemotron-3-ultra-550b-a55b": "medium",
+        }.get(modelo)
+        respuesta = self.generar(modelo, mensajes, maximo_tokens=maximo_tokens,
+                                 temperatura=0, imagenes_png=imagenes_png,
+                                 esfuerzo_razonamiento=esfuerzo_razonamiento)
+        if respuesta.finalizacion == "length":
+            raise ErrorNvidia(
+                f"Respuesta estructurada truncada por límite de tokens (modelo={modelo}, "
+                f"tokens_salida={respuesta.tokens_salida})", "malformed_response"
+            )
         try:
-            valido = esquema.model_validate(_contenido_json(respuesta.texto))
-        except (ValidationError, ErrorNvidia, TypeError):
-            raise ErrorNvidia("Respuesta JSON NVIDIA no cumple el esquema requerido", "malformed_response") from None
+            contenido = _contenido_json(respuesta.texto)
+        except ErrorNvidia:
+            raise ErrorNvidia(
+                f"Respuesta NVIDIA no contiene JSON válido (modelo={modelo}, "
+                f"finish_reason={respuesta.finalizacion}, tokens_salida={respuesta.tokens_salida})",
+                "malformed_response",
+            ) from None
+        try:
+            valido = esquema.model_validate(contenido)
+        except ValidationError as error:
+            ubicaciones = [
+                ".".join(str(parte) for parte in incidencia.get("loc", ())) or "raíz"
+                for incidencia in error.errors()[:5]
+            ]
+            resumen = ", ".join(ubicaciones)
+            raise ErrorNvidia(
+                f"Respuesta JSON NVIDIA no cumple el esquema (modelo={modelo}, "
+                f"finish_reason={respuesta.finalizacion}, campos={resumen or 'desconocidos'})",
+                "malformed_response",
+            ) from None
+        except TypeError:
+            raise ErrorNvidia(
+                f"Respuesta JSON NVIDIA no cumple el esquema (modelo={modelo}, "
+                f"finish_reason={respuesta.finalizacion})", "malformed_response"
+            ) from None
         return valido, respuesta
 
     def listar_modelos(self) -> list[dict]:
@@ -172,10 +209,16 @@ class RouterModelos:
 
     def __init__(self, proveedor: ProveedorNvidia | None = None):
         self.proveedor = proveedor or ProveedorNvidia()
+        self.modelos_planificador: list[str] = []
+
+    @staticmethod
+    def _solicitud_plan(descripcion: str) -> str:
+        return (f"Descripción original, única fuente para cotas especificadas:\n{descripcion}"
+                "\nNo hay CAD de referencia ni resultados del benchmark adjuntos.")
 
     def planificar(self, descripcion: str, permitir_fallback: bool = True):
-        solicitud = (f"Descripción original, única fuente para cotas especificadas:\n{descripcion}"
-                     "\nNo hay CAD de referencia ni resultados del benchmark adjuntos.")
+        solicitud = self._solicitud_plan(descripcion)
+        self.modelos_planificador = [NVIDIA_MODEL_PLANNER]
         try:
             return self.proveedor.generar_estructurado(
                 NVIDIA_MODEL_PLANNER, PROMPT_PLANIFICADOR, solicitud, PlanGeometrico
@@ -187,9 +230,20 @@ class RouterModelos:
                     or not (error.codigo == "malformed_response"
                         or any(codigo in str(error) for codigo in ("HTTP 400", "HTTP 404", "HTTP 422")))):
                 raise
+            self.modelos_planificador.append(NVIDIA_MODEL_PLANNER_FALLBACK)
             return self.proveedor.generar_estructurado(
                 NVIDIA_MODEL_PLANNER_FALLBACK, PROMPT_PLANIFICADOR, solicitud, PlanGeometrico
             )
+
+    def planificar_alternativo(self, descripcion: str):
+        """Consulta el modelo alternativo tras una respuesta completa con cotas inválidas."""
+        if (not self.modelos_planificador
+                or self.modelos_planificador[-1] != NVIDIA_MODEL_PLANNER_FALLBACK):
+            self.modelos_planificador.append(NVIDIA_MODEL_PLANNER_FALLBACK)
+        return self.proveedor.generar_estructurado(
+            NVIDIA_MODEL_PLANNER_FALLBACK, PROMPT_PLANIFICADOR,
+            self._solicitud_plan(descripcion), PlanGeometrico,
+        )
 
     def revisar_codigo(self, motor: str, plan: PlanGeometrico, codigo: str):
         solicitud = (f"Motor={motor}\nVersión y contrato exacto: {CONTRATOS_MOTOR[motor]}\n"
@@ -212,17 +266,15 @@ class RouterModelos:
         solicitud = (f"Descripción original: {descripcion}\nGeometricPlan:\n{plan.model_dump_json()}\n"
                      f"Métricas deterministas (fuente de medidas):\n{json.dumps(metricas, ensure_ascii=False)}\n"
                      "Inspecciona la lámina multivista adjunta, rotulada por orientación.")
-        respuesta = self.proveedor.generar(
-            NVIDIA_MODEL_VISUAL_REVIEWER,
-            [{"role": "system", "content": PROMPT_REVISOR_VISUAL},
-             {"role": "user", "content": solicitud}],
-            maximo_tokens=4096, temperatura=0, imagenes_png=[imagen],
-        )
         try:
-            revision = RevisionVisual.model_validate(_contenido_json(respuesta.texto))
-        except (ValidationError, ErrorNvidia, TypeError):
-            raise ErrorNvidia("Revisión visual NVIDIA no cumple el esquema requerido", "malformed_response") from None
-        return revision, respuesta
+            return self.proveedor.generar_estructurado(
+                NVIDIA_MODEL_VISUAL_REVIEWER, PROMPT_REVISOR_VISUAL,
+                solicitud, RevisionVisual, maximo_tokens=4096, imagenes_png=[imagen],
+            )
+        except ErrorNvidia as error:
+            raise ErrorNvidia(
+                f"Revisión visual inválida: {error}", getattr(error, "codigo", "malformed_response")
+            ) from None
 
 
 def catalogo_roles() -> dict:
