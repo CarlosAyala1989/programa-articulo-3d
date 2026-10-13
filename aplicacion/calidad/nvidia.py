@@ -214,8 +214,9 @@ class ProveedorNvidia:
 class RouterModelos:
     """Rutas por rol configurables mediante entorno."""
 
-    def __init__(self, proveedor: ProveedorNvidia | None = None):
+    def __init__(self, proveedor: ProveedorNvidia | None = None, rutas: dict | None = None):
         self.proveedor = proveedor or ProveedorNvidia()
+        self.rutas = rutas or catalogo_roles()
         self.modelos_planificador: list[str] = []
         self.modelos_revisor_codigo: list[str] = []
 
@@ -226,51 +227,56 @@ class RouterModelos:
 
     def planificar(self, descripcion: str, permitir_fallback: bool = True):
         solicitud = self._solicitud_plan(descripcion)
-        self.modelos_planificador = [NVIDIA_MODEL_PLANNER]
+        principal = self.rutas["planificador"]["modelo"]
+        alternativo = self.rutas["planificador"]["alternativo"]
+        self.modelos_planificador = [principal]
         try:
             return self.proveedor.generar_estructurado(
-                NVIDIA_MODEL_PLANNER, PROMPT_PLANIFICADOR, solicitud, PlanGeometrico
+                principal, PROMPT_PLANIFICADOR, solicitud, PlanGeometrico
             )
         except ErrorNvidia as error:
             # Fallback tras respuesta definitivamente rechazada o malformada;
             # nunca ante timeout o transporte con facturación incierta.
-            if (not permitir_fallback
+            if (not permitir_fallback or principal == alternativo
                     or not (error.codigo == "malformed_response"
                         or any(codigo in str(error) for codigo in ("HTTP 400", "HTTP 404", "HTTP 422")))):
                 raise
-            self.modelos_planificador.append(NVIDIA_MODEL_PLANNER_FALLBACK)
+            self.modelos_planificador.append(alternativo)
             return self.proveedor.generar_estructurado(
-                NVIDIA_MODEL_PLANNER_FALLBACK, PROMPT_PLANIFICADOR, solicitud, PlanGeometrico
+                alternativo, PROMPT_PLANIFICADOR, solicitud, PlanGeometrico
             )
 
     def planificar_alternativo(self, descripcion: str):
         """Consulta el modelo alternativo tras una respuesta completa con cotas inválidas."""
+        alternativo = self.rutas["planificador"]["alternativo"]
         if (not self.modelos_planificador
-                or self.modelos_planificador[-1] != NVIDIA_MODEL_PLANNER_FALLBACK):
-            self.modelos_planificador.append(NVIDIA_MODEL_PLANNER_FALLBACK)
+                or self.modelos_planificador[-1] != alternativo):
+            self.modelos_planificador.append(alternativo)
         return self.proveedor.generar_estructurado(
-            NVIDIA_MODEL_PLANNER_FALLBACK, PROMPT_PLANIFICADOR,
+            alternativo, PROMPT_PLANIFICADOR,
             self._solicitud_plan(descripcion), PlanGeometrico,
         )
 
     def revisar_codigo(self, motor: str, plan: PlanGeometrico, codigo: str):
         solicitud = (f"Motor={motor}\nVersión y contrato exacto: {CONTRATOS_MOTOR[motor]}\n"
                      f"GeometricPlan:\n{plan.model_dump_json()}\nPrograma:\n{codigo}")
-        self.modelos_revisor_codigo = [NVIDIA_MODEL_CODE_REVIEWER]
+        principal = self.rutas["revisor_codigo"]["modelo"]
+        alternativo = self.rutas["revisor_codigo"]["alternativo"]
+        self.modelos_revisor_codigo = [principal]
         try:
             return self.proveedor.generar_estructurado(
-                NVIDIA_MODEL_CODE_REVIEWER, PROMPT_REVISOR_CODIGO, solicitud, RevisionCodigo,
+                principal, PROMPT_REVISOR_CODIGO, solicitud, RevisionCodigo,
                 maximo_tokens=4096,
             )
         except ErrorNvidia as error:
             # Una respuesta malformada es un rechazo completo, así que permite
             # probar una alternativa. No repetir ante timeout ni transporte incierto.
             if (error.codigo != "malformed_response"
-                    or NVIDIA_MODEL_CODE_REVIEWER_FALLBACK == NVIDIA_MODEL_CODE_REVIEWER):
+                    or alternativo == principal):
                 raise
-            self.modelos_revisor_codigo.append(NVIDIA_MODEL_CODE_REVIEWER_FALLBACK)
+            self.modelos_revisor_codigo.append(alternativo)
             return self.proveedor.generar_estructurado(
-                NVIDIA_MODEL_CODE_REVIEWER_FALLBACK, PROMPT_REVISOR_CODIGO,
+                alternativo, PROMPT_REVISOR_CODIGO,
                 solicitud, RevisionCodigo, maximo_tokens=4096,
             )
 
@@ -278,7 +284,7 @@ class RouterModelos:
         solicitud = (f"GeometricPlan:\n{plan.model_dump_json()}\nEvidencia determinista/visual:\n"
                      f"{json.dumps(evidencia, ensure_ascii=False, allow_nan=False)}")
         return self.proveedor.generar_estructurado(
-            NVIDIA_MODEL_TEXT_JUDGE, PROMPT_CRITICO, solicitud, CriticaGeometrica,
+            self.rutas["juez_textual"]["modelo"], PROMPT_CRITICO, solicitud, CriticaGeometrica,
             maximo_tokens=4096,
         )
 
@@ -289,7 +295,7 @@ class RouterModelos:
                      "Inspecciona la lámina multivista adjunta, rotulada por orientación.")
         try:
             return self.proveedor.generar_estructurado(
-                NVIDIA_MODEL_VISUAL_REVIEWER, PROMPT_REVISOR_VISUAL,
+                self.rutas["revisor_visual"]["modelo"], PROMPT_REVISOR_VISUAL,
                 solicitud, RevisionVisual, maximo_tokens=4096, imagenes_png=[imagen],
             )
         except ErrorNvidia as error:

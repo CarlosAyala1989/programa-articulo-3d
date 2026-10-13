@@ -37,6 +37,9 @@ from aplicacion.metricas import calcular_metricas_campana
 from aplicacion.proveedores import modelos_configurados, verificar_modelo_local
 from aplicacion.calidad.nvidia import ErrorNvidia, ProveedorNvidia, catalogo_roles
 from aplicacion.proveedor_deepseek import ErrorProveedor
+from aplicacion.proveedor_suscripcion import catalogos_cli, estado_puente, modelos_cli_configurados
+from aplicacion.cli_suscripcion import proveedor_cli
+from aplicacion.calidad.suscripcion import validar_revisores
 from aplicacion.tareas import tarea_analisis, tarea_campana, tarea_generacion
 
 
@@ -54,6 +57,7 @@ class SolicitudGeneracion(BaseModel):
     esfuerzo_razonamiento: Literal["low", "high", "max"] | None = None
     modo: Literal["open-loop", "closed-loop", "quality-loop"] = "closed-loop"
     best_of_n: bool = False
+    proveedor_revisores: str = Field(default="nvidia", min_length=1, max_length=60)
 
 
 class SolicitudImportacion(BaseModel):
@@ -96,6 +100,17 @@ def consultar_salud() -> dict:
 @aplicacion.get("/api/opciones")
 def consultar_opciones() -> dict:
     nvidia_configurada = bool(os.environ.get("NVIDIA_API_KEY", "").strip())
+    suscripciones = modelos_cli_configurados()
+    catalogos = catalogos_cli()
+    revisores = {"nvidia": "NVIDIA · API"} if nvidia_configurada else {}
+    for clave, nombre in suscripciones.items():
+        origen = proveedor_cli(clave)
+        if origen == "antigravity-cli" and nvidia_configurada:
+            revisores[clave] = nombre + " · texto; NVIDIA · imágenes"
+        elif origen == "codex-cli":
+            detalle = catalogos.get(origen, {}).get("modelos", {}).get(clave, {})
+            if "::" not in clave or "image" in detalle.get("modalidades", []):
+                revisores[clave] = nombre + " · todos los roles"
     return {
         "motores": MOTORES_DISPONIBLES, "modelos": modelos_configurados(),
         "modelos_locales_catalogo": MODELOS_LOCALES,
@@ -104,7 +119,10 @@ def consultar_opciones() -> dict:
         "modos": {"open-loop": "Una generación", "closed-loop": "Hasta cinco reparaciones",
                   "quality-loop": "Plan geométrico, métricas y hasta tres ciclos"},
         "intentos_maximos": 5,
-        "quality_loop": {"disponible": nvidia_configurada,
+        "suscripciones": {"configurados": suscripciones, "catalogos": catalogos,
+            "estado_puente": estado_puente()},
+        "quality_loop": {"disponible": nvidia_configurada or "codex-cli" in modelos_cli_configurados(),
+            "proveedores_revisores": revisores,
             "maximo_iteraciones": MAXIMO_ITERACIONES_QUALITY_LOOP,
             "maximo_llamadas_ia": MAXIMO_LLAMADAS_QUALITY_LOOP,
             "maximo_tokens_estimados": MAXIMO_TOKENS_QUALITY_LOOP,
@@ -268,8 +286,14 @@ def iniciar_generacion(solicitud: SolicitudGeneracion) -> dict:
         esfuerzo = resolver_esfuerzo(solicitud.modelo, solicitud.esfuerzo_razonamiento)
     except ValueError as error:
         raise HTTPException(422, str(error)) from error
-    if solicitud.modo == "quality-loop" and not os.environ.get("NVIDIA_API_KEY", "").strip():
-        raise HTTPException(503, "Quality Loop requiere NVIDIA_API_KEY configurada en el backend y el trabajador")
+    if solicitud.modo == "quality-loop":
+        try:
+            validar_revisores(solicitud.proveedor_revisores,
+                             bool(os.environ.get("NVIDIA_API_KEY", "").strip()))
+        except ValueError as error:
+            raise HTTPException(503, str(error)) from None
+    elif solicitud.proveedor_revisores != "nvidia":
+        raise HTTPException(422, "Los revisores solo se aplican a Quality Loop")
     if solicitud.best_of_n and solicitud.modo != "quality-loop":
         raise HTTPException(422, "best_of_n solo está disponible en Quality Loop")
     descripcion = (solicitud.descripcion or "").strip()
@@ -290,7 +314,8 @@ def iniciar_generacion(solicitud: SolicitudGeneracion) -> dict:
             caso_identificador=solicitud.caso_identificador,
             modo=solicitud.modo, maximo_intentos=(1 if solicitud.modo == "open-loop"
                 else MAXIMO_ITERACIONES_QUALITY_LOOP if solicitud.modo == "quality-loop" else 5),
-            configuracion_calidad={"best_of_n": solicitud.best_of_n} if solicitud.modo == "quality-loop" else None,
+            configuracion_calidad={"best_of_n": solicitud.best_of_n,
+                "proveedor_revisores": solicitud.proveedor_revisores} if solicitud.modo == "quality-loop" else None,
             estado="pendiente", mensaje="Trabajo en cola",
         ))
         sesion.commit()

@@ -74,7 +74,7 @@ services:
       dockerfile: aplicacion/Dockerfile
     command: ["python", "-m", "aplicacion.iniciar_trabajador"]
     environment:
-      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?Configurar DEEPSEEK_API_KEY}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       OLLAMA_L01: ${OLLAMA_L01:-}
       OLLAMA_L02: ${OLLAMA_L02:-}
       OLLAMA_L03: ${OLLAMA_L03:-}

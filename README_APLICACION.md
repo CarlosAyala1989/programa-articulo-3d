@@ -6,7 +6,7 @@ Cada ejecución conserva la solicitud efectiva, respuesta, script, tokens, laten
 
 ## Arranque
 
-1. Crear un archivo de entorno **fuera del repositorio** con `DEEPSEEK_API_KEY=...`, por ejemplo `/tmp/agente-ciel.env`, y limitar sus permisos a `600`.
+1. Crear un archivo de entorno **fuera del repositorio**, por ejemplo `/tmp/agente-ciel.env`, y limitar sus permisos a `600`. Añadir `DEEPSEEK_API_KEY=...` si se usará DeepSeek, o configurar los proveedores de suscripción descritos abajo.
 2. Construir las tres imágenes CAD y los servicios:
 
    ```text
@@ -52,6 +52,115 @@ El system prompt se mantiene en `aplicacion/prompts_sistema.py`, con instruccion
 Los tres runtimes exportan un STL nativo con desviación lineal **absoluta de 0,02 mm** y angular **0,05 rad**. El STEP conserva la geometría B-Rep; el STL común del evaluador mantiene su perfil de comparación previamente definido. El visor suaviza normales de curvas y preserva discontinuidades angulares de 30° o más; esto afecta únicamente la iluminación, no las coordenadas ni los archivos. El encuadre inicial adapta la cámara al volumen y al tamaño del visor para mostrar la pieza con mayor claridad.
 
 **La validez CAD y la resolución STL no certifican parecido visual o fidelidad arqueológica.** La parada sigue ocurriendo al obtener el primer CAD válido y exportable en open-loop/closed-loop. Una réplica exacta necesita una referencia y una evaluación de semejanza apropiada; los rasgos ausentes no se recuperan solo aumentando la cantidad de triángulos. Quality Loop tiene su propio protocolo versionado (`ciel-quality-loop-v2`); la revisión v2 corrige la detección de agujeros, alinea las vistas con el frente del plan y clasifica los errores de proveedor. Los informes v1 conservan su versión y no deben combinarse con v2. Las campañas nuevas usan `v6-quality-loop-geometric-plan`. Las campañas de plantilla v5 o anterior conservan sus resultados históricos, pero deben recrearse para ejecutar nuevas condiciones con la versión actual.
+
+## Suscripciones de Codex y Antigravity en segundo plano
+
+Los proveedores `codex-cli` y `antigravity-cli` ejecutan los CLI oficiales con la sesión
+de la cuenta del usuario: una llamada independiente por generación, corrección o
+candidato. Funcionan con open-loop, closed-loop (hasta cinco generaciones) y Quality
+Loop/Best-of-N (hasta tres candidatos por ciclo). No requieren una ventana de terminal
+visible. Los resultados pasan por la misma política AST, supervisor CAD y evaluación.
+
+La ejecución no interactiva está documentada por
+[OpenAI](https://learn.chatgpt.com/docs/non-interactive-mode) y
+[Google](https://www.antigravity.google/docs/cli/headless/).
+Instala `codex` y el **CLI `agy`**, que es distinto del lanzador del IDE Antigravity.
+Inicia sesión una vez con `codex login` y una sesión interactiva `agy` usando tus cuentas.
+Codex debe mostrar `Logged in using ChatGPT` en `codex login status`. El adaptador
+rechaza una sesión Codex autenticada por API y una configuración `modelProvider=gemini`
+de Antigravity; elimina las claves de API heredadas del entorno del proceso hijo.
+Las sesiones las administran los CLI oficiales y nunca se copian a la base de datos,
+imágenes Docker o interfaz.
+
+Para Linux/macOS con Docker, el puente corre como el usuario de escritorio, conservando
+acceso a su keyring. Usa un directorio externo privado (modo `700`) y un socket Unix
+(modo `600`); no abre ningún puerto. El puente requiere solo Python estándar.
+
+```bash
+mkdir -p "$HOME/.local/state/agente-ciel/puente"
+chmod 700 "$HOME/.local/state/agente-ciel/puente"
+python -m aplicacion.puente_cli --socket "$HOME/.local/state/agente-ciel/puente/suscripciones.sock"
+```
+
+Para mantenerlo en background en Linux, un servicio de usuario de systemd puede ejecutar
+ese comando con `WorkingDirectory` apuntando al repositorio y un `PATH` que incluya ambos
+CLI. Debe ejecutarse en la sesión del mismo usuario autenticado. En este equipo está
+instalado como `agente-ciel-suscripciones.service`; puedes consultar su estado con
+`systemctl --user status agente-ciel-suscripciones`.
+
+Añade `CLI_PUENTE_DIRECTORIO=/ruta/absoluta/al/directorio/puente` al archivo externo de
+entorno, conserva su modo `600` y habilita el archivo Compose adicional:
+
+```bash
+docker compose --env-file /ruta/al/entorno.env -f compose.yaml -f compose.suscripciones.yaml build api trabajador
+docker compose --env-file /ruta/al/entorno.env -f compose.yaml -f compose.suscripciones.yaml up -d api trabajador
+```
+
+Opciones del puente: `CODEX_CLI_BIN` y `ANTIGRAVITY_CLI_BIN` cambian la ruta del ejecutable;
+`CODEX_CLI_MODELO` y `ANTIGRAVITY_CLI_MODELO` fijan un modelo compatible con la cuenta.
+Si se omiten, se usa la selección predeterminada del CLI. `CLI_TIMEOUT_SEGUNDOS` vale
+900 por defecto (rango 30–10800); configura el mismo valor en el puente y en Docker.
+`CLI_PROVEEDORES=codex-cli,antigravity-cli` controla los proveedores que anuncia Docker.
+En un backend nativo, incluido Windows, usa `CLI_LOCAL_HABILITADO=1` para ejecutar los
+CLI directamente y omite `CLI_PUENTE_SOCKET`. El puente Unix corresponde a Linux/macOS;
+no convierte todavía el proyecto en un instalador de escritorio.
+
+La interfaz también muestra los **modelos concretos** anunciados por cada CLI, agrupados
+por proveedor. El catálogo Codex procede de `codex app-server` mediante `model/list`;
+Antigravity usa `agy models`. Son consultas de metadatos sin turnos de inferencia, con
+caché de cinco minutos. Si la consulta falla, permanece la opción predeterminada del CLI
+y el error del catálogo se expone en `suscripciones.catalogos` de `/api/opciones`.
+El catálogo anunciado no certifica acceso ni cuota de la cuenta.
+
+Una selección como `codex-cli::gpt-6.1-sol` o
+`antigravity-cli::gemini-3.1-pro-high` se guarda como identidad de la ejecución y se envía
+al CLI mediante `--model` en cada generación, reparación y candidato. Esta selección
+explícita tiene prioridad sobre `CODEX_CLI_MODELO`/`ANTIGRAVITY_CLI_MODELO` del puente.
+Los nombres del ejemplo solo estarán disponibles si aparecen en el catálogo local.
+Para los revisores se elige independientemente un modelo concreto del mismo catálogo;
+solo se ofrecen revisores Codex que anuncien entrada de imágenes. Antigravity conserva
+NVIDIA para la revisión visual. La API acepta estas mismas identidades en `modelo` y
+`proveedor_revisores`. Las ejecuciones anteriores conservan su elección y trazas.
+
+En la interfaz selecciona el generador y, para Quality Loop, **Planificador y revisores**:
+
+| Selección de revisores | Planificación, código y crítica textual | Revisión visual |
+|---|---|---|
+| NVIDIA (predeterminado) | API NVIDIA | API NVIDIA |
+| Codex | Suscripción Codex | Suscripción Codex, con PNG adjunto |
+| Antigravity | Suscripción Antigravity | API NVIDIA |
+
+La API acepta `proveedor_revisores` con `nvidia`, `codex-cli`, `antigravity-cli` o una
+identidad concreta del catálogo en
+`POST /api/ejecuciones`. Se guarda con la ejecución. Antigravity mantiene NVIDIA para
+las imágenes porque este adaptador usa la entrada headless documentada de texto, que
+no admite bloques multimedia. Codex permite todos los roles sin NVIDIA. Los roles son
+llamadas orquestadas por el backend; no dependen de un mecanismo interno de subagentes.
+Las ejecuciones Quality Loop con suscripción se identifican como
+`ciel-quality-loop-cli-v2` y `ciel-cli-routing-v2`; el perfil CLI usa
+`ciel-cli-subscription-v2`. Las versiones v1 conservan las selecciones predeterminadas
+del CLI usadas antes de añadir el catálogo. Los experimentos históricos mantienen
+su protocolo y sus resultados. La clave DeepSeek es opcional al levantar Docker y solo
+se necesita cuando se elige ese proveedor.
+
+Las cuotas, permisos del plan, caducidad de sesión y disponibilidad de modelos siguen
+aplicándose. El primer inicio de sesión y cualquier reautenticación requieren intervención
+del usuario; no es posible garantizar automatización ilimitada. Antigravity necesita un
+keyring accesible y desbloqueado. No se activan compras de créditos ni respaldos de API
+para fallos de generación CLI. Ante timeout no se repite la solicitud: un fallo de generación
+bloquea la ejecución; los errores de planificación/revisión se registran siguiendo el
+protocolo Quality Loop existente y nunca se convierten en aprobación del revisor.
+El puente procesa una sola inferencia a la vez y rechaza
+solicitudes concurrentes sin consumir cuota. Los límites de tokens de los proveedores API
+no pueden imponerse al CLI; Quality Loop conserva reservas estimadas y consumo observado,
+sin presentarlos como un límite duro de suscripción. El coste de suscripción no se convierte
+en una tarifa API ni se certifica como cero. Si el CLI no informa tokens o modelo efectivo,
+se registra esa incertidumbre en el perfil de la llamada.
+
+`GET /api/opciones` informa los proveedores configurados y la salud del puente. La salud
+comprueba disponibilidad del transporte y los ejecutables, sin consumir inferencias ni
+certificar que la cuenta tiene cuota. Las pruebas `test_suscripciones.py` simulan todas
+las respuestas CLI; la validación de instalación no debe consumir cuotas reales.
 
 ## Quality Loop experimental
 

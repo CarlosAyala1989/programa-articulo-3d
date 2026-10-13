@@ -3,6 +3,8 @@
 import os
 import re
 
+from aplicacion.cli_suscripcion import proveedor_cli, perfil_cli
+
 
 URL_BASE_DATOS = os.environ.get(
     "URL_BASE_DATOS", "postgresql+psycopg://ciel:ciel_local@postgres:5432/ciel"
@@ -117,6 +119,10 @@ ESFUERZO_PREDETERMINADO = "max"
 
 
 def resolver_esfuerzo(modelo: str, esfuerzo_razonamiento: str | None = None) -> str | None:
+    if proveedor_cli(modelo):
+        if esfuerzo_razonamiento is not None:
+            raise ValueError("El esfuerzo DeepSeek no corresponde a un CLI de suscripción")
+        return None
     if modelo in MODELOS_LOCALES:
         if esfuerzo_razonamiento is not None:
             raise ValueError("El nivel de esfuerzo solo está disponible para DeepSeek Flash y Pro")
@@ -138,6 +144,10 @@ def perfil_generacion(
     maximo_tokens: int | None = None,
 ) -> dict:
     esfuerzo = resolver_esfuerzo(modelo, esfuerzo_razonamiento)
+    if proveedor_cli(modelo):
+        if maximo_tokens is not None:
+            raise ValueError("Los CLI de suscripción no admiten el límite de tokens DeepSeek")
+        return perfil_cli(modelo)
     if modelo in MODELOS_LOCALES:
         if maximo_tokens is not None:
             raise ValueError("El límite DeepSeek no corresponde a un modelo local")

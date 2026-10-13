@@ -18,6 +18,18 @@ const nombresModelo = {
   'deepseek-v4-pro': 'DeepSeek Pro',
 };
 
+function OpcionesModelos({ modelos }) {
+  const grupos = [
+    ['Otros proveedores', (clave) => !clave.startsWith('codex-cli') && !clave.startsWith('antigravity-cli')],
+    ['Codex · suscripción ChatGPT', (clave) => clave.startsWith('codex-cli')],
+    ['Antigravity · suscripción Google', (clave) => clave.startsWith('antigravity-cli')],
+  ];
+  return grupos.map(([nombre, incluir]) => {
+    const entradas = Object.entries(modelos || {}).filter(([clave]) => incluir(clave));
+    return entradas.length > 0 && <optgroup label={nombre} key={nombre}>{entradas.map(([clave, etiqueta]) => <option value={clave} key={clave}>{etiqueta}</option>)}</optgroup>;
+  });
+}
+
 function valorMetrica(registro) {
   if (!registro) return 'No disponible';
   if (registro.estado !== 'calculated') return registro.estado.replaceAll('_', ' ');
@@ -205,6 +217,7 @@ function Aplicacion() {
   const [esfuerzo, cambiarEsfuerzo] = useState('max');
   const [modo, cambiarModo] = useState('closed-loop');
   const [bestOfN, cambiarBestOfN] = useState(false);
+  const [proveedorRevisores, cambiarProveedorRevisores] = useState('nvidia');
   const [casoSeleccionado, cambiarCasoSeleccionado] = useState(null);
   const [opciones, cambiarOpciones] = useState(null);
   const [identificador, cambiarIdentificador] = useState(() => leerRuta().identificador || localStorage.getItem('ciel_ultima_ejecucion') || '');
@@ -266,6 +279,13 @@ function Aplicacion() {
     return () => { activo = false; clearTimeout(temporizador); };
   }, [identificador]);
 
+  useEffect(() => {
+    const proveedores = opciones?.quality_loop?.proveedores_revisores;
+    if (proveedores && !proveedores[proveedorRevisores]) {
+      cambiarProveedorRevisores(Object.keys(proveedores)[0] || '');
+    }
+  }, [opciones, proveedorRevisores]);
+
   async function iniciar(evento) {
     evento.preventDefault();
     cambiarError('');
@@ -276,6 +296,7 @@ function Aplicacion() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ descripcion, caso_identificador: casoSeleccionado?.identificador || null, motor, modelo, modo,
           best_of_n: modo === 'quality-loop' && bestOfN,
+          proveedor_revisores: modo === 'quality-loop' ? proveedorRevisores : 'nvidia',
           esfuerzo_razonamiento: nivelesEsfuerzo(opciones, modelo) ? esfuerzo : null }),
       });
       const datos = await respuesta.json();
@@ -318,8 +339,10 @@ function Aplicacion() {
           {casoSeleccionado && <p className="nota-campana">Caso {casoSeleccionado.codigo} · {casoSeleccionado.nivel}. <button type="button" className="enlace-boton" onClick={() => cambiarCasoSeleccionado(null)}>Quitar asociación</button></p>}
           <textarea id="descripcion" value={descripcion} onChange={(evento) => { cambiarDescripcion(evento.target.value); cambiarCasoSeleccionado(null); }} minLength={12} maxLength={4000} rows={7} placeholder="Dimensiones en milímetros, agujeros, radios, posiciones y otras restricciones…" required />
           <div className="contador">{descripcion.length} / 4000 caracteres</div>
-          <div className="campos"><div><label htmlFor="modelo">MODELO DE IA</label><select id="modelo" value={modelo} onChange={(evento) => cambiarModelo(evento.target.value)} required><option value="">Selecciona un modelo</option>{Object.entries(opciones?.modelos || nombresModelo).map(([clave, nombre]) => <option value={clave} key={clave}>{nombre}</option>)}</select></div><CampoEsfuerzo identificador="esfuerzo" modelo={modelo} opciones={opciones} valor={esfuerzo} alCambiar={cambiarEsfuerzo} /></div>
-          <div className="campos"><div><label htmlFor="motor">MOTOR CAD</label><select id="motor" value={motor} onChange={(evento) => cambiarMotor(evento.target.value)}>{Object.entries(opciones?.motores || nombresMotor).map(([clave, nombre]) => <option value={clave} key={clave}>{nombre}</option>)}</select></div><div><label htmlFor="modo">ESTRATEGIA</label><select id="modo" value={modo} onChange={(evento) => cambiarModo(evento.target.value)}><option value="open-loop">Open-loop · una generación</option><option value="closed-loop">Closed-loop · hasta cinco</option><option value="quality-loop" disabled={!opciones?.quality_loop?.disponible}>Quality Loop · métricas y revisión{!opciones?.quality_loop?.disponible ? ' (NVIDIA no configurado)' : ''}</option></select></div></div>
+          <div className="campos"><div><label htmlFor="modelo">MODELO DE IA</label><select id="modelo" value={modelo} onChange={(evento) => cambiarModelo(evento.target.value)} required><option value="">Selecciona un modelo</option><OpcionesModelos modelos={opciones?.modelos || nombresModelo} /></select></div><CampoEsfuerzo identificador="esfuerzo" modelo={modelo} opciones={opciones} valor={esfuerzo} alCambiar={cambiarEsfuerzo} /></div>
+          <div className="campos"><div><label htmlFor="motor">MOTOR CAD</label><select id="motor" value={motor} onChange={(evento) => cambiarMotor(evento.target.value)}>{Object.entries(opciones?.motores || nombresMotor).map(([clave, nombre]) => <option value={clave} key={clave}>{nombre}</option>)}</select></div><div><label htmlFor="modo">ESTRATEGIA</label><select id="modo" value={modo} onChange={(evento) => cambiarModo(evento.target.value)}><option value="open-loop">Open-loop · una generación</option><option value="closed-loop">Closed-loop · hasta cinco</option><option value="quality-loop" disabled={!opciones?.quality_loop?.disponible}>Quality Loop · métricas y revisión{!opciones?.quality_loop?.disponible ? ' (revisores no configurados)' : ''}</option></select></div></div>
+          {modo === 'quality-loop' && <div><label htmlFor="proveedor-revisores">PLANIFICADOR Y REVISORES</label><select id="proveedor-revisores" value={proveedorRevisores} onChange={(evento) => cambiarProveedorRevisores(evento.target.value)} required><option value="" disabled>Selecciona los revisores</option><OpcionesModelos modelos={opciones?.quality_loop?.proveedores_revisores} /></select></div>}
+          {opciones?.suscripciones?.configurados?.[modelo] && <p className="nota">Usa la sesión de tu cuenta en segundo plano. Cada generación, reparación y candidato consume la cuota de tu suscripción.</p>}
           {modo === 'quality-loop' && <label className="opcion-best"><input type="checkbox" checked={bestOfN} onChange={(evento) => cambiarBestOfN(evento.target.checked)} /><span><strong>Best-of-N</strong><small>Generar y comparar hasta 3 candidatos por ciclo. Aumenta el uso de modelos; no es comparable directamente con los modos históricos.</small></span></label>}
           <div className="nota">{modo === 'closed-loop' ? <>Hasta <strong>5 generaciones totales</strong>: una inicial y cuatro correcciones si son necesarias.</> : modo === 'quality-loop' ? <>Planner, revisor de código, evaluación CAD y revisión visual; máximo <strong>{opciones?.quality_loop?.maximo_iteraciones || 3} ciclos</strong>, <strong>{opciones?.quality_loop?.maximo_llamadas_ia || 40} llamadas IA</strong> y <strong>{((opciones?.quality_loop?.maximo_tokens_estimados || 800000) / 1000).toFixed(0)} mil tokens presupuestados</strong>. La validez técnica y la aceptación geométrica se reportan por separado.</> : <><strong>Una generación</strong> sin feedback ni corrección.</>} {modo !== 'quality-loop' && 'Se detiene al obtener CAD válido y exportable.'}</div>
           {error && <p className="error" role="alert">{error}</p>}

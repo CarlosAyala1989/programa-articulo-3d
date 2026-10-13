@@ -51,6 +51,28 @@ class BuclesGeneracion(unittest.TestCase):
             self.assertEqual(ejecucion.intentos[0].fase_error, "sintaxis")
         self.assertEqual(proveedor.call_count, 1)
 
+    def test_suscripciones_usan_el_mismo_open_y_closed_loop_con_feedback(self):
+        for modelo in ("codex-cli", "antigravity-cli", "codex-cli::gpt-6.1-sol",
+                       "antigravity-cli::gemini-3.1-pro-high"):
+            for modo, maximo in (("open-loop", 1), ("closed-loop", 5)):
+                with self.subTest(modelo=modelo, modo=modo):
+                    identificador = f"{modelo}-{modo}"
+                    self.crear_ejecucion(identificador, modo)
+                    with self.sesiones() as sesion:
+                        sesion.get(Ejecucion, identificador).modelo = modelo
+                        sesion.commit()
+                    with patch("aplicacion.generacion.crear_sesion", self.sesiones), \
+                         patch("aplicacion.proveedores.solicitar_cli", return_value=respuesta("esto no es python !!!")) as cli:
+                        procesar_ejecucion(identificador)
+                    self.assertEqual(cli.call_count, maximo)
+                    self.assertEqual(cli.call_args.args[0], modelo)
+                    with self.sesiones() as sesion:
+                        ejecucion = sesion.get(Ejecucion, identificador)
+                        self.assertEqual(ejecucion.numero_intentos, maximo)
+                        self.assertEqual(ejecucion.estado, "fallida")
+                        if modo == "closed-loop":
+                            self.assertTrue(ejecucion.intentos[-1].solicitud_modelo["retroalimentacion"])
+
     def test_closed_loop_conserva_exito_de_codigo_previo_a_cad(self):
         self.crear_ejecucion("cerrado", "closed-loop")
         codigo = "import cadquery as cq\nresultado = cq.Workplane('XY').box(20,20,20)"

@@ -1,0 +1,1961 @@
+# MISIÓN PRINCIPAL
+
+Trabaja sobre el repositorio existente:
+
+`CarlosAyala1989/programa-articulo-3d`
+
+Tu objetivo es evolucionar el sistema actual **Agente Ciel** para mejorar significativamente la generación, validación, crítica y reparación de geometría CAD compleja mediante IA.
+
+NO reconstruyas el proyecto desde cero.
+
+NO reemplaces arbitrariamente su arquitectura actual.
+
+NO elimines funcionalidades que ya funcionan.
+
+NO cambies el propósito científico del proyecto.
+
+Debes partir del código existente, entenderlo completamente, preservar sus decisiones correctas y realizar cambios incrementales, comprobables, versionados y compatibles.
+
+La meta fundamental es evolucionar desde:
+
+`Prompt → IA → Python → CAD válido → éxito`
+
+hacia:
+
+`Prompt → planificación geométrica → generación CAD → validación técnica → evaluación geométrica/semántica → crítica → reparación → aceptación`
+
+El principio rector es:
+
+**Un CAD ejecutable o un B-Rep válido no implica que la geometría solicitada sea correcta.**
+
+El sistema debe distinguir explícitamente:
+
+`código válido`
+
+de:
+
+`CAD válido`
+
+de:
+
+`geometría correcta`
+
+de:
+
+`geometría fiel al objetivo`.
+
+---
+
+# RESTRICCIONES DE ALCANCE
+
+En esta etapa NO implementar:
+
+- escaneo 3D;
+- reconstrucción mediante escáner;
+- fotogrametría;
+- point clouds procedentes de sensores;
+- ICP físico;
+- metrología física;
+- impresión 3D;
+- slicing;
+- G-code;
+- configuración de impresoras;
+- compensaciones de fabricación;
+- análisis posterior a impresión;
+- comparación pieza física versus CAD.
+
+Tampoco integrar modelos generativos de mesh como sustitutos del CAD paramétrico.
+
+La representación maestra sigue siendo B-Rep/STEP producida mediante:
+
+- CadQuery;
+- build123d;
+- FreeCAD Python API;
+- y, solo cuando resulte justificable, acceso controlado a determinados componentes de OCP/OpenCascade.
+
+STL continúa siendo una representación derivada para visualización/evaluación digital, NO la autoridad geométrica.
+
+---
+
+# PRIMERA OBLIGACIÓN: AUDITAR ANTES DE MODIFICAR
+
+Antes de realizar cambios:
+
+1. Lee `README.md`.
+2. Lee `README_APLICACION.md`.
+3. Lee `AGENTS.md`.
+4. Lee `PLAN_TECNICO_AGENTE_CIEL.md`.
+5. Revisa completamente:
+   - `aplicacion/generacion.py`
+   - `aplicacion/prompts_sistema.py`
+   - `aplicacion/retroalimentacion.py`
+   - `aplicacion/analisis.py`
+   - `aplicacion/proveedores.py`
+   - `aplicacion/proveedor_deepseek.py`
+   - `aplicacion/configuracion.py`
+   - `aplicacion/metricas.py`
+   - `aplicacion/base_datos.py`
+   - `motores/ejecutar.py`
+   - `evaluador/api.py`
+   - `supervisor/api.py`
+   - `compose.yaml`
+   - todos los tests de `pruebas/`
+   - `datos/prompts_60_v1.json`.
+6. Identifica las invariantes experimentales existentes.
+7. Ejecuta las pruebas actuales ANTES de modificar nada.
+8. Registra qué pruebas pasan.
+9. No atribuyas a código inexistente funcionalidades que solo estén documentadas.
+
+No realices una refactorización masiva innecesaria.
+
+Trabaja incrementalmente.
+
+---
+
+# PRINCIPIO DE COMPATIBILIDAD
+
+La funcionalidad experimental existente debe continuar siendo reproducible.
+
+Los modos actuales:
+
+`open-loop`
+
+y:
+
+`closed-loop`
+
+NO deben desaparecer.
+
+Las campañas antiguas deben poder distinguirse de las nuevas mediante versión de protocolo/plantilla.
+
+No mezcles resultados obtenidos bajo distintas versiones como si fueran equivalentes.
+
+Actualiza la versión de plantilla a una nueva versión claramente identificable, por ejemplo:
+
+`v6-quality-loop-geometric-plan`
+
+o equivalente.
+
+No modifiques silenciosamente campañas congeladas.
+
+---
+
+# NO ALTERAR EL DATASET CIENTÍFICO EXISTENTE
+
+`CAD-LLMIA-60` debe permanecer congelado.
+
+No reescribir:
+
+`datos/prompts_60_v1.json`
+
+para hacer parecer mejores los resultados.
+
+Si hacen falta pruebas adicionales para:
+
+- lofts complejos;
+- freeform;
+- splines;
+- sweep;
+- superficies orgánicas;
+- formas asimétricas;
+- continuidad;
+- rasgos anatómicos;
+- formas híbridas;
+
+crear OTRO conjunto versionado.
+
+Por ejemplo:
+
+`CAD-LLMIA-Complex-1`
+
+Ese dataset es adicional y no reemplaza al conjunto científico existente.
+
+---
+
+# ARQUITECTURA OBJETIVO
+
+Implementa conceptualmente las siguientes etapas:
+
+USER DESCRIPTION
+↓
+GEOMETRIC PLANNER
+↓
+GEOMETRIC PLAN
+↓
+CAD GENERATOR
+↓
+STATIC CODE VALIDATION
+↓
+ISOLATED CAD RUNTIME
+↓
+TECHNICAL VALIDATOR
+↓
+GEOMETRIC EVALUATOR
+↓
+SEMANTIC / GEOMETRIC CRITIC
+↓
+QUALITY GATE
+↓
+ACCEPT
+o
+REPAIR
+↓
+REPEAT
+
+No conviertas esto necesariamente en microservicios independientes si no existe una razón técnica.
+
+Aprovecha la arquitectura actual.
+
+---
+
+# 1. IMPLEMENTAR GEOMETRIC PLAN
+
+Agregar una representación intermedia estructurada denominada conceptualmente:
+
+`GeometricPlan`
+
+No permitir que la única representación entre lenguaje natural y Python sea texto libre.
+
+Usa modelos Pydantic versionados.
+
+El plan debe poder representar como mínimo:
+
+- versión del esquema;
+- unidades;
+- clase de objeto;
+- categoría de modelado;
+- sistema de coordenadas;
+- orientación del frente;
+- dimensiones globales;
+- bounding box esperada si existe;
+- volumen principal;
+- features;
+- dependencias;
+- simetrías;
+- restricciones;
+- operaciones;
+- perfiles;
+- trayectorias;
+- espesores;
+- agujeros;
+- cavidades;
+- relieves;
+- cortes;
+- regiones secundarias;
+- relaciones padre/hijo;
+- medidas explícitas;
+- medidas inferidas;
+- tolerancias explícitas;
+- rasgos esenciales;
+- criterios verificables.
+
+Clasificación mínima:
+
+`MECHANICAL_PRECISE`
+
+`ORGANIC_FREEFORM`
+
+`HYBRID`
+
+Toda dimensión debe indicar procedencia:
+
+`specified`
+
+o:
+
+`inferred`.
+
+Nunca convertir una cota explícita en una medida inferida.
+
+Cada feature debe poseer un identificador estable:
+
+`feature_id`.
+
+Ejemplo conceptual:
+
+{
+  "schema_version": "...",
+  "units": "mm",
+  "modeling_class": "ORGANIC_FREEFORM",
+  "coordinate_system": {...},
+  "global_dimensions": {...},
+  "features": [...],
+  "constraints": [...]
+}
+
+No codifiques el sistema de forma rígida para una cabeza Chavín.
+
+La cabeza Chavín puede disponer de reglas especializadas existentes, pero GeometricPlan debe ser genérico.
+
+---
+
+# 2. SEPARAR PLANNER Y MODELER
+
+Actualmente el mismo LLM debe interpretar y programar.
+
+Separar conceptualmente estas responsabilidades.
+
+## PLANNER
+
+Responsable de traducir lenguaje natural → GeometricPlan.
+
+No produce Python.
+
+## MODELER
+
+Recibe:
+
+- descripción original;
+- GeometricPlan validado;
+- motor;
+- contrato de API;
+- recipes relevantes;
+- historial cuando corresponda.
+
+Produce Python.
+
+El Modeler NO debe reinterpretar silenciosamente cotas explícitas.
+
+---
+
+# 3. CREAR PROMPTS ESPECIALIZADOS
+
+No mantener un único system prompt universal orientado primordialmente a formas orgánicas.
+
+Crear perfiles como mínimo:
+
+`MECHANICAL_PRECISE`
+
+`ORGANIC_FREEFORM`
+
+`HYBRID`
+
+Mantener una base común.
+
+Separar:
+
+- contrato de seguridad;
+- contrato del runtime;
+- reglas específicas del motor;
+- estrategia por clase geométrica;
+- recipes seleccionadas.
+
+No duplicar grandes bloques innecesariamente.
+
+---
+
+# 4. ELIMINAR EL SESGO DEL ÚNICO EJEMPLO DE LOFT
+
+Actualmente se proporciona siempre un ejemplo de loft.
+
+Esto puede inducir al LLM a seleccionar loft incluso cuando no corresponde.
+
+Crear una biblioteca interna de recipes verificadas.
+
+Por ejemplo:
+
+`recipes/cadquery/`
+`recipes/build123d/`
+`recipes/freecad/`
+
+Con recipes conceptuales para:
+
+- extrude;
+- revolve;
+- loft;
+- sweep;
+- hollow;
+- curved cut;
+- spline profile;
+- patterned features;
+- organic relief;
+- asymmetric loft;
+- transition;
+- rib;
+- local coordinate frame.
+
+No enviar todos los ejemplos a cada solicitud.
+
+Seleccionar únicamente aquellos relevantes al GeometricPlan.
+
+La selección debe ser determinista cuando sea posible.
+
+No convertir recipes en piezas completas de respaldo.
+
+---
+
+# 5. CONSERVAR CADQUERY, BUILD123D Y FREECAD
+
+No eliminar ningún motor existente.
+
+Mantener:
+
+`cadquery`
+`build123d`
+`freecad`
+
+Conservar generación independiente por motor.
+
+No traducir automáticamente el resultado de un motor para fingir éxito en otro.
+
+Mantener aislamiento Docker.
+
+Mantener límites de memoria, CPU, procesos, tiempo y red.
+
+Mantener comprobación independiente de STEP/STL.
+
+---
+
+# 6. OCP AVANZADO, PERO CONTROLADO
+
+Investigar si determinadas geometrías complejas se benefician de acceso a componentes específicos de OCP/OpenCascade.
+
+NO permitir:
+
+`import OCP`
+
+sin control.
+
+Si se añade soporte avanzado:
+
+crear allowlist explícita de módulos/clases necesarios.
+
+Evaluar especialmente soporte para:
+
+- BSpline curves;
+- BSpline surfaces;
+- interpolación;
+- construcción de wires;
+- sewing;
+- faces;
+- transformaciones;
+- puntos;
+- vectores.
+
+No permitir:
+
+- filesystem arbitrario;
+- subprocess;
+- network;
+- eval;
+- exec generado;
+- import dinámico;
+- escape del sandbox.
+
+El acceso OCP debe ampliar capacidades geométricas, no debilitar la seguridad.
+
+---
+
+# 7. NUEVO CRITERIO DE ÉXITO
+
+ESTE CAMBIO ES CRÍTICO.
+
+No considerar automáticamente completada una generación solamente porque:
+
+- Python ejecutó;
+- B-Rep es válido;
+- existe un sólido;
+- volumen > 0;
+- STEP exporta;
+- STL exporta.
+
+Esas condiciones constituyen:
+
+`technical_success`.
+
+Agregar otro concepto:
+
+`quality_success`.
+
+La ejecución solo debe considerarse aceptada por el nuevo modo Quality Loop cuando:
+
+1. technical_success == true
+2. quality gate == accepted
+
+Mantener métricas separadas.
+
+No redefinir las métricas históricas de forma incompatible.
+
+---
+
+# 8. QUALITY GATE
+
+Crear un evaluador estructurado.
+
+Debe considerar según disponibilidad:
+
+- B-Rep válido;
+- número de sólidos;
+- exportabilidad;
+- watertight;
+- DangEL;
+- bounding box;
+- dimensiones globales;
+- volumen;
+- área superficial;
+- centroide;
+- simetría;
+- features verificables;
+- posiciones de features;
+- diferencias contra referencia;
+- IoU B-Rep;
+- Chamfer;
+- Hausdorff robusto;
+- normal consistency;
+- silhouette IoU;
+- feature completeness.
+
+No todas las métricas aplican a todos los objetos.
+
+El Quality Gate debe saber cuándo una métrica es:
+
+`not_applicable`
+
+y cuándo es:
+
+`not_available`.
+
+No convertir ausencia de datos en cero.
+
+---
+
+# 9. MEJORAR LAS MÉTRICAS GEOMÉTRICAS
+
+Conservar:
+
+- IoU B-Rep;
+- Chamfer digital;
+- volumen;
+- watertight;
+- DangEL.
+
+Añadir, donde técnicamente sea correcto:
+
+## Bounding Box Error
+
+Comparar dimensiones X/Y/Z.
+
+## Centroid Error
+
+Distancia del centroide.
+
+## Surface Area Error
+
+Diferencia relativa.
+
+## Hausdorff robusto
+
+Evitar depender exclusivamente del máximo absoluto sensible a outliers.
+
+Calcular al menos percentiles como:
+
+P95
+
+P99
+
+además del máximo si resulta útil.
+
+## Normal Consistency
+
+Comparación entre normales superficiales en muestras relacionadas.
+
+## Symmetry Error
+
+Solo cuando el GeometricPlan declare una simetría esperada.
+
+## Feature Completeness
+
+Número/peso de features verificadas frente al total verificable.
+
+## Silhouette IoU
+
+Comparación multivista cuando exista una referencia apropiada.
+
+Toda métrica debe guardar:
+
+- unidad;
+- algoritmo;
+- número de muestras;
+- semilla;
+- tolerancia;
+- perfil;
+- versión.
+
+Reproducibilidad obligatoria.
+
+---
+
+# 10. NO ENVIAR REFERENCIAS CIENTÍFICAS A LA IA GENERADORA
+
+Mantener una separación estricta.
+
+Las referencias STEP independientes del benchmark NO deben ser enviadas a:
+
+- Planner;
+- Modeler;
+- Repairer.
+
+Esto evita contaminación experimental.
+
+El Evaluator puede utilizarlas.
+
+El Critic automático del nuevo quality-loop solamente podrá recibir métricas derivadas de una referencia cuando la configuración experimental lo permita explícitamente.
+
+Debe registrarse esa condición como un protocolo distinto.
+
+Nunca ocultar esa diferencia.
+
+---
+
+# 11. IMPLEMENTAR REVISIÓN MULTIVISTA DIGITAL
+
+Esto NO ES ESCANEO 3D.
+
+Esto NO ES IMPRESIÓN 3D.
+
+Se trata solamente de renderizar el CAD digital ya generado.
+
+Generar vistas reproducibles del modelo:
+
+- frontal;
+- posterior;
+- izquierda;
+- derecha;
+- superior;
+- inferior;
+- isométrica 1;
+- isométrica 2.
+
+Usar:
+
+- cámara determinista;
+- fondo consistente;
+- proyección conocida;
+- mismo encuadre relativo;
+- iluminación controlada;
+- resolución versionada.
+
+No alterar la geometría.
+
+Los renders son evidencia adicional para evaluación semántica.
+
+---
+
+# 12. INTEGRAR NVIDIA BUILD COMO NUEVO PROVEEDOR
+
+Agregar proveedor:
+
+`nvidia_nim`
+
+sin eliminar:
+
+`DeepSeek`
+
+ni:
+
+`Ollama`.
+
+La API NVIDIA debe configurarse exclusivamente mediante variables de entorno.
+
+Usar:
+
+`NVIDIA_API_KEY`
+
+Base URL:
+
+`https://integrate.api.nvidia.com/v1`
+
+Nunca:
+
+- hardcodear la API key;
+- guardarla en PostgreSQL;
+- escribirla en logs;
+- incorporarla a exportaciones;
+- copiarla dentro de imágenes Docker;
+- enviarla al frontend.
+
+Crear una abstracción compatible con los proveedores actuales.
+
+Implementar timeout explícito.
+
+Registrar:
+
+- provider;
+- model;
+- endpoint lógico;
+- parámetros;
+- tokens cuando estén disponibles;
+- latencia;
+- finish reason;
+- errores;
+- versión de configuración.
+
+No reintentar silenciosamente una llamada cuyo resultado/facturación sea incierto.
+
+Seguir el mismo principio de trazabilidad utilizado por el proveedor DeepSeek existente.
+
+---
+
+# 13. MODELOS NVIDIA Y ROLES
+
+Configurar inicialmente estos IDs EXACTOS:
+
+## GEOMETRIC PLANNER PRINCIPAL
+
+`nvidia/nemotron-3-ultra-550b-a55b`
+
+Responsabilidad:
+
+- descomposición geométrica;
+- planificación;
+- análisis de restricciones;
+- evaluación estructural textual;
+- razonamiento complejo.
+
+No genera automáticamente la pieza final.
+
+## PLANNER/JUDGE ALTERNATIVO
+
+`nvidia/nemotron-3-super-120b-a12b`
+
+Debe poder configurarse como alternativa al Ultra.
+
+## CODE REVIEWER
+
+`poolside/laguna-xs-2.1`
+
+Debe revisar específicamente:
+
+- calidad Python;
+- errores de API;
+- errores de librería;
+- código muerto;
+- operaciones redundantes;
+- excepciones ocultas;
+- uso incorrecto de CadQuery;
+- uso incorrecto de build123d;
+- uso incorrecto de FreeCAD;
+- seguridad;
+- complejidad;
+- operaciones CAD frágiles;
+- problemas de mantenibilidad.
+
+Laguna NO decide por sí solo si visualmente una escultura se parece al objetivo.
+
+Es revisor de código.
+
+## VISUAL GEOMETRIC REVIEWER
+
+`moonshotai/kimi-k3`
+
+Recibe:
+
+- GeometricPlan resumido;
+- descripción original;
+- renders multivista;
+- métricas geométricas relevantes.
+
+Debe evaluar:
+
+- silueta;
+- proporción;
+- rasgos principales;
+- relaciones espaciales;
+- presencia/ausencia de features visuales;
+- orientación;
+- coherencia entre vistas.
+
+No debe declarar exactitud dimensional basándose solamente en imágenes.
+
+Las medidas numéricas provienen del evaluador determinista.
+
+## GENERATOR NVIDIA OPCIONAL
+
+`deepseek-ai/deepseek-v4.1-flash`
+
+Agregarlo como generador seleccionable mediante NVIDIA NIM.
+
+NO sustituir automáticamente el DeepSeek directo existente.
+
+Tratarlo como una condición/modelo diferente.
+
+## JUDGE TEXTUAL OPCIONAL
+
+`z-ai/glm-5.3`
+
+Permitirlo como juez textual alternativo para ensayos comparativos.
+
+## VISUAL REASONER EXPERIMENTAL OPCIONAL
+
+`nvidia/cosmos3-nano-reasoner`
+
+No usarlo de manera predeterminada hasta validar su integración y restricciones.
+
+Puede emplearse posteriormente como segundo revisor especializado de comprensión física/visual.
+
+---
+
+# 14. ROUTING DE MODELOS
+
+No hacer llamadas caras/innecesarias a todos los modelos.
+
+Crear un Model Router configurable.
+
+Ejemplo conceptual:
+
+planning:
+  primary: nvidia/nemotron-3-ultra-550b-a55b
+  fallback: nvidia/nemotron-3-super-120b-a12b
+
+code_review:
+  primary: poolside/laguna-xs-2.1
+
+visual_review:
+  primary: moonshotai/kimi-k3
+
+generation:
+  configurable:
+    - existing DeepSeek
+    - Ollama
+    - deepseek-ai/deepseek-v4.1-flash vía NVIDIA
+
+El routing debe configurarse mediante entorno/configuración.
+
+No hardcodear decisiones irreversibles.
+
+---
+
+# 15. REVISOR DE CÓDIGO OBLIGATORIO EN QUALITY MODE
+
+Cuando se utilice el nuevo modo avanzado:
+
+Generator
+↓
+Static AST policy
+↓
+Laguna Code Reviewer
+↓
+CAD Runtime
+
+El revisor de código debe devolver JSON estructurado.
+
+Formato conceptual:
+
+{
+  "accepted": true,
+  "severity": "none|low|medium|high|critical",
+  "issues": [
+    {
+      "category": "...",
+      "line": 0,
+      "description": "...",
+      "repair": "..."
+    }
+  ]
+}
+
+No permitir que el reviewer modifique directamente los validadores para hacer pasar un resultado.
+
+Si encuentra un problema crítico:
+
+enviar feedback al Modeler antes de ejecutar el runtime cuando corresponda.
+
+No hacer ciclos infinitos.
+
+---
+
+# 16. GEOMETRIC CRITIC
+
+Implementar un Critic separado del Modeler.
+
+El Critic recibe evidencia.
+
+No genera automáticamente código.
+
+Debe emitir JSON estructurado semejante a:
+
+{
+  "accepted": false,
+  "score": 0.82,
+  "subscores": {
+    "dimensional": 0.99,
+    "topological": 1.0,
+    "structural": 0.95,
+    "feature_completeness": 0.75,
+    "silhouette": 0.71,
+    "reference_similarity": null
+  },
+  "errors": [...],
+  "preserve": [...],
+  "repair_priority": [...]
+}
+
+El score no debe inventarse arbitrariamente.
+
+Documentar fórmula y pesos.
+
+Los pesos dependen de:
+
+`MECHANICAL_PRECISE`
+
+`ORGANIC_FREEFORM`
+
+`HYBRID`.
+
+Para mecánica:
+
+dimensiones y features exactas pesan más.
+
+Para orgánico:
+
+silueta, proporciones, features y superficie pesan más.
+
+Para híbrido:
+
+usar combinación explícita.
+
+---
+
+# 17. DETERMINISMO ANTES QUE LLM
+
+No usar un LLM para algo que puede medirse con geometría computacional.
+
+Ejemplos:
+
+DIÁMETRO:
+medir geométricamente.
+
+BOUNDING BOX:
+medir geométricamente.
+
+VOLUMEN:
+kernel CAD.
+
+NÚMERO DE SÓLIDOS:
+kernel CAD.
+
+CENTROIDE:
+kernel CAD.
+
+DISTANCIA:
+cálculo determinista.
+
+El LLM sirve para:
+
+- interpretar;
+- planificar;
+- criticar aspectos semánticos;
+- detectar discrepancias complejas;
+- proponer reparación.
+
+Nunca debe sustituir mediciones deterministas.
+
+---
+
+# 18. REPAIRER MEJORADO
+
+El Repairer debe recibir:
+
+- descripción original;
+- GeometricPlan;
+- código actual completo;
+- errores técnicos;
+- informe del code reviewer;
+- métricas geométricas;
+- informe del geometric critic;
+- lista `preserve`;
+- historial.
+
+Principio:
+
+**No destruir features correctas para arreglar features incorrectas.**
+
+Si el error es global:
+
+corregir volumen/silueta principal antes de detalles.
+
+Si es local:
+
+evitar reconstruir innecesariamente el cuerpo completo.
+
+Si una estrategia falló repetidamente:
+
+cambiar la estrategia constructiva.
+
+No permitir:
+
+`hacer la figura más simple para que compile`.
+
+---
+
+# 19. BEST-OF-N PARA CASOS DIFÍCILES
+
+Agregar opcionalmente un modo:
+
+`best_of_n`
+
+NO activarlo obligatoriamente en campañas históricas.
+
+Para solicitudes complejas:
+
+generar N candidatos independientes.
+
+Valor inicial razonable configurable:
+
+`N = 3`
+
+Cada candidato debe:
+
+- conservar mismo prompt;
+- mismo GeometricPlan;
+- mismo motor;
+- misma condición experimental;
+- tener identificador propio.
+
+Evaluar cada candidato.
+
+Seleccionar el de mejor quality score.
+
+Continuar reparación únicamente desde el ganador.
+
+Registrar todos los candidatos.
+
+No ocultar candidatos fallidos.
+
+Permitir desactivar Best-of-N por costos/reproducibilidad.
+
+---
+
+# 20. PRESUPUESTO DE QUALITY LOOP
+
+Mantener límite duro de iteraciones.
+
+No bucles indefinidos.
+
+Los cinco intentos históricos del closed-loop deben preservarse como comportamiento existente.
+
+Para el nuevo Quality Loop crear configuración separada.
+
+Registrar:
+
+- generaciones;
+- revisiones de código;
+- revisiones geométricas;
+- llamadas visuales;
+- tokens;
+- costo estimado;
+- duración.
+
+Aplicar presupuesto.
+
+Nunca superar silenciosamente el presupuesto configurado.
+
+---
+
+# 21. GENERACIÓN ORGÁNICA MEJORADA
+
+Mejorar las reglas ya existentes.
+
+Para `ORGANIC_FREEFORM`:
+
+trabajar jerárquicamente:
+
+volumen primario
+→ masas secundarias
+→ transiciones
+→ features
+→ detalles.
+
+No modelar todos los detalles en un mismo plano.
+
+Usar frames locales.
+
+Priorizar cuando corresponda:
+
+- splines;
+- BSplines;
+- lofts;
+- sweeps;
+- perfiles asimétricos;
+- secciones desplazadas;
+- secciones rotadas;
+- variación controlada de curvatura.
+
+Evitar:
+
+- primitivas pegadas como sustituto del objeto;
+- ojos flotantes;
+- nariz flotante;
+- relieves tangentes sin intersección;
+- surcos que no abren al exterior;
+- detalles representados únicamente mediante comentarios;
+- fillets globales frágiles.
+
+---
+
+# 22. GENERACIÓN MECÁNICA PRECISA
+
+Para `MECHANICAL_PRECISE`:
+
+priorizar:
+
+- cotas exactas;
+- sketches simples;
+- extrusion;
+- revolve;
+- patrones;
+- holes;
+- pockets;
+- transforms;
+- constraints explícitas.
+
+No usar splines o lofts orgánicos sin necesidad.
+
+Una cota explícita es autoritativa.
+
+No sacrificar exactitud por apariencia.
+
+---
+
+# 23. MODELOS HÍBRIDOS
+
+Para `HYBRID`:
+
+separar regiones.
+
+Ejemplo:
+
+estructura mecánica exacta
+
++
+
+cubierta orgánica/freeform.
+
+No obligar a representar ambos dominios mediante la misma estrategia.
+
+---
+
+# 24. FEATURE VERIFICATION
+
+GeometricPlan debe permitir declarar features verificables.
+
+Ejemplo:
+
+hole_01:
+  diameter: 8
+  position: [10, 0]
+  axis: Z
+
+El evaluador debe poder producir:
+
+expected diameter: 8
+observed diameter: ...
+error: ...
+
+Cuando una verificación automática no sea fiable:
+
+marcar:
+
+`verification_status = unsupported`
+
+No fingir una medición.
+
+---
+
+# 25. MULTIVIEW VISUAL REVIEW
+
+El revisor Kimi K3 debe recibir composiciones de vistas claramente identificadas:
+
+FRONT
+BACK
+LEFT
+RIGHT
+TOP
+BOTTOM
+ISO_A
+ISO_B
+
+Su system prompt debe indicar:
+
+Eres un inspector visual de geometría CAD.
+
+No evalúas si el código Python es elegante.
+
+No declaras medidas que no están en las métricas.
+
+Compara la descripción, GeometricPlan y renders.
+
+Detecta features faltantes, deformadas, mal posicionadas o desproporcionadas.
+
+Devuelve JSON.
+
+No aceptes una pieza solamente porque "se parece en general".
+
+Identifica errores por feature_id cuando sea posible.
+
+---
+
+# 26. SYSTEM PROMPT DEL PLANNER
+
+Crear un prompt equivalente conceptualmente a:
+
+ERES UN ARQUITECTO GEOMÉTRICO CAD.
+
+No generes código.
+
+Convierte la descripción en una especificación geométrica estructurada y verificable.
+
+Identifica unidades, sistema de coordenadas, dimensiones, simetrías, operaciones, perfiles, trayectorias, features, relaciones espaciales, restricciones topológicas y criterios verificables.
+
+Clasifica el objeto como MECHANICAL_PRECISE, ORGANIC_FREEFORM o HYBRID.
+
+Nunca transformes una cota explícita en una aproximación.
+
+Marca cada valor no especificado como inferred.
+
+Cada feature debe tener un identificador estable.
+
+La salida será JSON conforme al esquema GeometricPlan.
+
+No incluyas Markdown.
+
+---
+
+# 27. SYSTEM PROMPT DEL MODELER
+
+Crear un prompt equivalente conceptualmente a:
+
+ERES UN INGENIERO SENIOR DE CAD PARAMÉTRICO Y GEOMETRÍA COMPUTACIONAL.
+
+Recibes GeometricPlan validado.
+
+No elimines features.
+
+No cambies medidas explícitas.
+
+Construye jerárquicamente.
+
+Valida operaciones principales.
+
+Los detalles deben modificar realmente la geometría.
+
+Los relieves deben intersectar el cuerpo.
+
+Los cortes visibles deben alcanzar el exterior.
+
+Un CAD técnicamente válido pero geométricamente incorrecto no representa éxito.
+
+Devuelve exclusivamente Python completo.
+
+La pieza final debe asignarse a resultado.
+
+---
+
+# 28. SYSTEM PROMPT DEL GEOMETRIC CRITIC
+
+Conceptualmente:
+
+ERES UN INSPECTOR GEOMÉTRICO CAD.
+
+No generes código.
+
+Recibes GeometricPlan y evidencia geométrica.
+
+Evalúa:
+
+- dimensional;
+- topological;
+- structural;
+- silhouette;
+- feature completeness;
+- surface quality;
+- reference similarity cuando exista.
+
+No consideres isValid=true suficiente.
+
+Devuelve JSON estructurado.
+
+Cada error debe contener:
+
+- feature_id;
+- expected;
+- observed;
+- severity;
+- probable_cause;
+- repair_strategy.
+
+Incluye una lista `preserve` con features ya correctas.
+
+---
+
+# 29. SYSTEM PROMPT DEL CODE REVIEWER
+
+Para Laguna:
+
+ERES UN REVISOR SENIOR DE PYTHON CAD.
+
+Tu tarea es encontrar defectos antes de ejecutar el programa.
+
+Conoces la versión exacta del motor proporcionada en contexto.
+
+Evalúa:
+
+- llamadas inexistentes;
+- firmas incorrectas;
+- imports prohibidos;
+- operaciones degeneradas;
+- fillets globales;
+- booleans frágiles;
+- perfiles duplicados;
+- solids desconectados previsibles;
+- errores de frames;
+- usos incorrectos de loft/sweep/revolve;
+- código innecesariamente costoso;
+- intentos de evadir validadores.
+
+No rediseñes el objeto.
+
+No cambies cotas.
+
+Devuelve solamente el informe JSON solicitado.
+
+---
+
+# 30. SYSTEM PROMPT DEL REPAIRER
+
+Conceptualmente:
+
+ERES UN ESPECIALISTA EN REPARACIÓN CAD PARAMÉTRICA.
+
+Recibes:
+
+GeometricPlan,
+programa actual,
+errores,
+métricas,
+critic,
+preserve.
+
+Devuelve el programa completo corregido.
+
+No destruyas features correctas.
+
+Corrige primero la causa raíz más importante.
+
+No simplifiques el objeto para obtener validez.
+
+No repitas una estrategia demostrablemente fallida.
+
+Prioridades:
+
+1. cotas explícitas;
+2. topología;
+3. silueta;
+4. proporciones;
+5. features esenciales;
+6. superficie;
+7. detalles secundarios.
+
+---
+
+# 31. SEGURIDAD
+
+Conservar y mejorar la política AST existente.
+
+Prohibir:
+
+- open;
+- eval;
+- exec;
+- compile;
+- __import__;
+- subprocess;
+- sockets;
+- red;
+- acceso arbitrario al filesystem;
+- introspección peligrosa;
+- atributos especiales peligrosos.
+
+No confiar únicamente en el prompt.
+
+La seguridad debe implementarse también en código.
+
+Mantener contenedores:
+
+- sin network;
+- read_only;
+- cap_drop ALL;
+- no-new-privileges;
+- usuario no root;
+- límites de memoria;
+- límites CPU;
+- pids_limit;
+- timeout.
+
+---
+
+# 32. TESTS OBLIGATORIOS
+
+No des por completado el trabajo hasta añadir pruebas.
+
+Mantener todos los tests actuales.
+
+Añadir pruebas para:
+
+GeometricPlan válido.
+
+GeometricPlan inválido.
+
+Cotas specified vs inferred.
+
+Routing MECHANICAL/ORGANIC/HYBRID.
+
+Selección de recipes.
+
+NVIDIA provider.
+
+NVIDIA key ausente.
+
+NVIDIA timeout.
+
+NVIDIA respuesta malformada.
+
+Code reviewer accepted.
+
+Code reviewer rejected.
+
+Quality gate accepted.
+
+Technical success pero quality failure.
+
+Technical failure.
+
+Feature completeness.
+
+Bounding box error.
+
+Centroid error.
+
+Hausdorff.
+
+Normal consistency si se implementa.
+
+Symmetry metric.
+
+Best-of-N.
+
+Preserve durante reparación.
+
+Quality loop agotado.
+
+Quality loop aceptado tras reparación.
+
+Visual reviewer mock.
+
+No enviar STEP reference al generador.
+
+No enviar referencia al Planner.
+
+No enviar referencia al Modeler.
+
+Compatibilidad con campañas anteriores.
+
+---
+
+# 33. TESTS DE REGRESIÓN GEOMÉTRICA
+
+Agregar fixtures simples con valores conocidos.
+
+Ejemplos:
+
+dos cubos iguales → IoU 1.
+
+cubos separados → IoU 0.
+
+pieza desplazada → centroid error conocido.
+
+pieza escalada → bounding box error conocido.
+
+superficies idénticas → Chamfer ≈ 0.
+
+superficies idénticas → Hausdorff ≈ 0.
+
+simetría perfecta → symmetry error ≈ 0.
+
+agujero ausente → feature completeness menor.
+
+---
+
+# 34. NO USAR IA REAL EN UNIT TESTS
+
+Mockear NVIDIA.
+
+Mockear DeepSeek.
+
+Mockear Ollama.
+
+Las llamadas pagadas/reales solo deben ejecutarse como pruebas explícitas de integración.
+
+Nunca al ejecutar automáticamente la suite unitaria.
+
+---
+
+# 35. BASE DE DATOS Y TRAZABILIDAD
+
+Agregar solo las tablas/campos necesarios.
+
+No borrar evidencia histórica.
+
+Persistir:
+
+- geometric_plan;
+- planner_model;
+- planner_provider;
+- plan_version;
+- code_review;
+- critic_review;
+- visual_review;
+- quality_score;
+- quality_subscores;
+- quality_gate_result;
+- metrics_profile;
+- candidate_id;
+- parent_candidate_id si aplica;
+- preserved_features;
+- repair_priority;
+- modelo exacto;
+- proveedor;
+- configuración.
+
+Las migraciones deben ser compatibles con datos existentes.
+
+---
+
+# 36. INTERFAZ
+
+No rehacer React desde cero.
+
+Añadir visualización de:
+
+Geometric Plan
+
+Technical Validation
+
+Code Review
+
+Geometric Metrics
+
+Visual Review
+
+Quality Gate
+
+Repair Feedback
+
+Candidate Ranking
+
+Mostrar claramente:
+
+CAD TÉCNICAMENTE VÁLIDO
+
+y:
+
+CAD ACEPTADO POR QUALITY GATE
+
+como estados distintos.
+
+Nunca presentar un quality failure como success.
+
+---
+
+# 37. CONFIGURACIÓN NVIDIA
+
+Añadir variables similares a:
+
+NVIDIA_API_KEY
+
+NVIDIA_BASE_URL=https://integrate.api.nvidia.com/v1
+
+NVIDIA_MODEL_PLANNER=nvidia/nemotron-3-ultra-550b-a55b
+
+NVIDIA_MODEL_PLANNER_FALLBACK=nvidia/nemotron-3-super-120b-a12b
+
+NVIDIA_MODEL_CODE_REVIEWER=poolside/laguna-xs-2.1
+
+NVIDIA_MODEL_VISUAL_REVIEWER=moonshotai/kimi-k3
+
+NVIDIA_MODEL_GENERATOR=deepseek-ai/deepseek-v4.1-flash
+
+NVIDIA_MODEL_TEXT_JUDGE=z-ai/glm-5.3
+
+No poner valores secretos en `.env.example`.
+
+Solo nombres de variables.
+
+---
+
+# 38. API NVIDIA
+
+Crear un cliente limpio y testeable.
+
+Preferir compatibilidad OpenAI cuando el modelo/endpoint la soporte.
+
+La arquitectura no debe depender internamente del SDK OpenAI.
+
+Crear una interfaz propia del proyecto.
+
+Ejemplo conceptual:
+
+ProveedorIA
+  generar(...)
+  generar_estructurado(...)
+  analizar_imagenes(...)
+
+DeepSeekProvider
+NvidiaProvider
+OllamaProvider
+
+Los consumidores no deben conocer detalles HTTP específicos.
+
+---
+
+# 39. RESPUESTAS ESTRUCTURADAS
+
+Planner, Code Reviewer y Critic deben usar modelos Pydantic.
+
+Nunca confiar ciegamente en JSON del LLM.
+
+Validar.
+
+Si el JSON no cumple:
+
+registrar el error.
+
+Permitir reparación controlada del formato cuando corresponda.
+
+No convertir JSON inválido en aceptación.
+
+---
+
+# 40. MANEJO DE FALLOS DEL REVIEWER
+
+Un fallo de infraestructura de NVIDIA no significa:
+
+`geometría incorrecta`.
+
+Clasificar por separado:
+
+- provider_error;
+- timeout;
+- malformed_response;
+- review_rejected;
+- geometry_rejected.
+
+No consumir iteraciones geométricas por fallos de infraestructura salvo que el protocolo lo defina.
+
+---
+
+# 41. COSTO Y USO DE MODELOS
+
+No llamar a Nemotron Ultra innecesariamente.
+
+Planner normalmente se ejecuta una vez.
+
+Code Reviewer se ejecuta sobre candidatos nuevos o reparados.
+
+Visual Reviewer solo después de technical_success.
+
+Critic textual trabaja sobre métricas compactas.
+
+No reenviar archivos binarios enormes como texto.
+
+No reenviar código/historial redundante sin necesidad.
+
+Guardar costos estimados cuando la API permita obtener uso.
+
+---
+
+# 42. BEST-OF-N NO DEBE DISTORSIONAR EXPERIMENTOS
+
+Una campaña Best-of-N es una condición distinta.
+
+Registrar:
+
+best_of_n = 3
+
+No comparar directamente sus éxitos con open-loop top-1 sin identificar la diferencia experimental.
+
+---
+
+# 43. REFERENCIAS Y NO CONTAMINACIÓN
+
+El modelo generador no ve:
+
+- STEP ground truth;
+- scripts ground truth;
+- métricas futuras;
+- soluciones humanas del benchmark.
+
+El sistema evaluador sí puede utilizarlos según protocolo.
+
+Mantener esta separación visible en código.
+
+---
+
+# 44. CRITERIOS DE ACEPTACIÓN
+
+No terminar hasta que:
+
+1. Tests existentes pasen.
+2. Tests nuevos pasen.
+3. La aplicación arranque.
+4. Los tres runtimes CAD sigan funcionando.
+5. Open-loop siga funcionando.
+6. Closed-loop antiguo siga funcionando.
+7. Quality-loop funcione.
+8. NVIDIA sea opcional y no impida arrancar si no está configurado.
+9. Una API key NVIDIA nunca aparezca en logs.
+10. Technical success y quality success estén separados.
+11. GeometricPlan quede persistido.
+12. Code Reviewer use Laguna cuando esté configurado.
+13. Planner use Nemotron cuando esté configurado.
+14. Visual Reviewer use Kimi K3 cuando esté configurado.
+15. Un technical-success deliberadamente incorrecto pueda ser rechazado por Quality Gate.
+16. Un candidato rechazado pueda repararse sin borrar features de `preserve`.
+17. Los datasets históricos no hayan sido alterados.
+
+---
+
+# 45. PRUEBA DE DEMOSTRACIÓN OBLIGATORIA
+
+Crear pruebas controladas que demuestren la diferencia entre el sistema antiguo y nuevo.
+
+Caso A:
+
+pieza técnicamente válida y correcta.
+
+Esperado:
+
+technical_success = true
+quality_success = true
+
+Caso B:
+
+pieza técnicamente válida pero geométricamente incorrecta.
+
+Por ejemplo:
+
+prompt solicita placa 100 × 60 × 10 con cuatro agujeros;
+
+respuesta genera placa 100 × 60 × 10 con solo dos agujeros.
+
+Esperado:
+
+technical_success = true
+quality_success = false
+feature completeness detecta el problema.
+
+Caso C:
+
+forma orgánica válida pero excesivamente simplificada.
+
+Esperado:
+
+technical_success = true
+visual/semantic review = rejected
+
+Caso D:
+
+programa con API incorrecta.
+
+Esperado:
+
+Laguna Code Reviewer o runtime detectan el problema.
+
+---
+
+# 46. DOCUMENTACIÓN
+
+Actualizar:
+
+README_APLICACION.md
+
+AGENTS.md si cambia arquitectura de desarrollo.
+
+Agregar documentación de:
+
+GeometricPlan.
+
+Quality Loop.
+
+NVIDIA provider.
+
+Model Router.
+
+Métricas nuevas.
+
+Diferencia entre:
+
+technical success
+
+y:
+
+quality success.
+
+Explicar explícitamente:
+
+No se implementó escaneo 3D.
+
+No se implementó impresión 3D.
+
+No se realiza certificación física.
+
+---
+
+# 47. NO SOBREAFIRMAR
+
+No escribir en documentación:
+
+"genera cualquier modelo perfectamente"
+
+"garantiza exactitud"
+
+"comprueba fidelidad absoluta"
+
+si no existe evidencia experimental.
+
+Usar lenguaje verificable.
+
+Ejemplo:
+
+"el Quality Loop incorpora comprobaciones adicionales de fidelidad geométrica digital".
+
+---
+
+# 48. ORDEN RECOMENDADO DE IMPLEMENTACIÓN
+
+Trabaja aproximadamente en este orden:
+
+FASE 1
+Auditoría + tests actuales.
+
+FASE 2
+GeometricPlan + modelos Pydantic.
+
+FASE 3
+Planner + clasificación geométrica.
+
+FASE 4
+Perfiles de prompts + recipe retrieval.
+
+FASE 5
+Proveedor NVIDIA + Model Router.
+
+FASE 6
+Laguna Code Reviewer.
+
+FASE 7
+Métricas geométricas nuevas.
+
+FASE 8
+Quality Gate + Critic.
+
+FASE 9
+Render multivista determinista.
+
+FASE 10
+Kimi K3 Visual Reviewer.
+
+FASE 11
+Repair loop usando métricas + preserve.
+
+FASE 12
+Best-of-N opcional.
+
+FASE 13
+Interfaz.
+
+FASE 14
+Tests integrales.
+
+FASE 15
+Documentación.
+
+No avanzar dejando fases anteriores rotas.
+
+---
+
+# 49. PRINCIPIOS DE IMPLEMENTACIÓN
+
+Evita introducir complejidad sin beneficio medible.
+
+Usa componentes pequeños.
+
+Usa typing.
+
+Usa Pydantic.
+
+Usa dataclasses cuando proceda.
+
+Mantén identificadores y textos internos coherentes con el proyecto.
+
+Conserva español en nombres propios del sistema cuando esa es la convención existente.
+
+No agregues dependencias pesadas si el stack actual puede resolver el problema.
+
+Toda nueva dependencia debe justificarse.
+
+No dupliques funciones geométricas ya presentes.
+
+---
+
+# 50. PRINCIPIO FINAL
+
+Este sistema no debe optimizarse para:
+
+"conseguir que algo compile".
+
+Debe optimizarse para:
+
+"conseguir un modelo CAD válido que satisfaga de manera medible la especificación geométrica".
+
+El código generado es un medio.
+
+El objetivo es la geometría.
+
+No aceptes éxito técnico como sustituto de fidelidad geométrica.
+
+No sacrifiques la geometría para hacer desaparecer errores.
+
+No ocultes errores.
+
+No alteres los evaluadores para mejorar artificialmente las tasas.
+
+No modifiques los datasets para mejorar artificialmente los resultados.
+
+Conserva todas las evidencias.
+
+Antes de declarar el trabajo terminado:
+
+ejecuta la suite completa,
+
+revisa los cambios,
+
+ejecuta los tests de regresión,
+
+comprueba seguridad,
+
+comprueba compatibilidad,
+
+y entrega un informe final de:
+
+- archivos modificados;
+- archivos creados;
+- decisiones arquitectónicas;
+- migraciones;
+- tests ejecutados;
+- resultados;
+- limitaciones pendientes.
+
+Implementa los cambios realmente.
+
+No te limites a describir cómo podrían implementarse.

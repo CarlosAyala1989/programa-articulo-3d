@@ -12,10 +12,13 @@ from aplicacion.configuracion import (
 )
 from aplicacion.proveedor_deepseek import ErrorProveedor, solicitar_codigo as solicitar_deepseek
 from aplicacion.calidad.nvidia import ErrorNvidia, ProveedorNvidia
+from aplicacion.cli_suscripcion import ErrorCLI, proveedor_cli
+from aplicacion.proveedor_suscripcion import modelos_cli_configurados, solicitar_cli
 
 
 def modelos_configurados() -> dict:
     resultado = dict(MODELOS_DISPONIBLES)
+    resultado.update(modelos_cli_configurados())
     if os.environ.get("NVIDIA_API_KEY", "").strip():
         resultado.update(MODELOS_NVIDIA_GENERADORES)
         if NVIDIA_MODEL_GENERATOR in MODELOS_NVIDIA_REGISTRADOS:
@@ -57,6 +60,11 @@ def solicitar_codigo(
     maximo_tokens: int | None = None,
 ) -> dict:
     perfil = perfil_generacion(modelo, esfuerzo_razonamiento, maximo_tokens)
+    if proveedor_cli(modelo):
+        try:
+            return solicitar_cli(modelo, mensajes)
+        except ErrorCLI as error:
+            raise ErrorProveedor(str(error)) from None
     if modelo in MODELOS_DISPONIBLES:
         respuesta = solicitar_deepseek(modelo, mensajes, esfuerzo_razonamiento, maximo_tokens)
         respuesta["proveedor"] = "deepseek"

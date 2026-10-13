@@ -1,0 +1,22 @@
+# El socket vive en el escritorio; las sesiones y el keyring no se montan en Docker.
+services:
+  api:
+    environment:
+      CLI_PUENTE_SOCKET: /puente/suscripciones.sock
+      CLI_PROVEEDORES: ${CLI_PROVEEDORES:-codex-cli,antigravity-cli}
+      CLI_TIMEOUT_SEGUNDOS: ${CLI_TIMEOUT_SEGUNDOS:-900}
+    volumes:
+      - type: bind
+        source: ${CLI_PUENTE_DIRECTORIO:?Configurar directorio externo del puente}
+        target: /puente
+        read_only: true
+  trabajador:
+    environment:
+      CLI_PUENTE_SOCKET: /puente/suscripciones.sock
+      CLI_PROVEEDORES: ${CLI_PROVEEDORES:-codex-cli,antigravity-cli}
+      CLI_TIMEOUT_SEGUNDOS: ${CLI_TIMEOUT_SEGUNDOS:-900}
+    volumes:
+      - type: bind
+        source: ${CLI_PUENTE_DIRECTORIO:?Configurar directorio externo del puente}
+        target: /puente
+        read_only: true

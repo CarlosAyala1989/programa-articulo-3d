@@ -40,6 +40,8 @@ from aplicacion.costos import costo_estimado
 from aplicacion.generacion import extraer_codigo, guardar_archivos, revisar_codigo, solicitar_ejecucion_cad
 from aplicacion.proveedor_deepseek import ErrorProveedor
 from aplicacion.proveedores import solicitar_codigo
+from aplicacion.cli_suscripcion import MODELOS_SUSCRIPCION, proveedor_cli
+from aplicacion.calidad.suscripcion import ProveedorRolesSuscripcion, rutas_revision
 
 
 VERSION_PROTOCOLO = "ciel-quality-loop-v2"
@@ -70,10 +72,11 @@ def _entrada_llamada(rol: str, respuesta, modelo_solicitado: str, proveedor: str
     tokens_entrada = int(getattr(respuesta, "tokens_entrada", 0) or 0)
     tokens_salida = int(getattr(respuesta, "tokens_salida", 0) or 0)
     return {
-        "rol": rol, "proveedor": proveedor,
-        "modelo_solicitado": modelo_solicitado,
+        "rol": rol, "proveedor": getattr(respuesta, "proveedor", proveedor),
+        "modelo_solicitado": getattr(respuesta, "modelo_solicitado", modelo_solicitado),
         "modelo_informado": getattr(respuesta, "modelo", None),
-        "endpoint_logico": "chat/completions",
+        "endpoint_logico": "cli/headless" if getattr(respuesta, "proveedor", None) in MODELOS_SUSCRIPCION else "chat/completions",
+        "perfil_cli": getattr(respuesta, "perfil", None),
         "tokens_entrada": tokens_entrada,
         "tokens_salida": tokens_salida,
         "costo_estimado_usd": costo_estimado(modelo_solicitado, tokens_entrada, tokens_salida),
@@ -87,8 +90,8 @@ def _entrada_llamada_fallida(rol: str, modelo: str, error: Exception,
                              latencia: float, reserva: int,
                              llamadas_http: int) -> dict:
     return {
-        "rol": rol, "proveedor": "nvidia_nim", "modelo_solicitado": modelo,
-        "endpoint_logico": "chat/completions", "tokens_entrada": 0,
+        "rol": rol, "proveedor": proveedor_cli(modelo) or "nvidia_nim", "modelo_solicitado": modelo,
+        "endpoint_logico": "cli/headless" if proveedor_cli(modelo) else "chat/completions", "tokens_entrada": 0,
         "tokens_salida": 0, "costo_estimado_usd": None,
         "latencia_segundos": latencia, "llamadas_http": llamadas_http,
         "tokens_reservados": reserva * llamadas_http,
@@ -313,6 +316,9 @@ def _validar_plan_con_respaldo(router, descripcion: str, plan: PlanGeometrico,
     except ValueError:
         proveedor = getattr(router, "proveedor", None)
         llamadas = int(getattr(proveedor, "llamadas", 0) or 0)
+        ruta = getattr(router, "rutas", {}).get("planificador", {})
+        if proveedor_cli(ruta.get("modelo", "")):
+            raise
         if (not permitir_respaldo or llamadas >= 2
                 or getattr(respuesta_plan, "modelo", None) == NVIDIA_MODEL_PLANNER_FALLBACK):
             raise
@@ -470,23 +476,27 @@ def procesar_quality_loop(identificador: str) -> None:
             sesion.commit()
             return
         ejecucion.estado = "generando"
-        ejecucion.mensaje = "Planificando la geometría con NVIDIA Nemotron"
+        ejecucion.mensaje = "Planificando la geometría"
         ejecucion.fecha_inicio = ejecucion.fecha_inicio or fecha_actual()
         descripcion, motor, modelo = ejecucion.descripcion, ejecucion.motor, ejecucion.modelo
         esfuerzo, caso_id = ejecucion.esfuerzo_razonamiento, ejecucion.caso_identificador
         configuracion = dict(ejecucion.configuracion_calidad or {})
+        revisores = configuracion.get("proveedor_revisores", "nvidia")
+        roles = rutas_revision(revisores)
+        protocolo = ("ciel-quality-loop-cli-v2"
+                     if proveedor_cli(modelo) or revisores != "nvidia" else VERSION_PROTOCOLO)
         best_of_n = bool(configuracion.get("best_of_n", False))
         cantidad_candidatos = 3 if best_of_n else 1
         configuracion.update({
-            "version_protocolo": VERSION_PROTOCOLO,
+            "version_protocolo": protocolo,
             "version_plantilla_legacy": VERSION_PLANTILLA,
             "maximo_iteraciones": MAXIMO_ITERACIONES_QUALITY_LOOP,
             "maximo_candidatos_por_iteracion": cantidad_candidatos,
             "maximo_llamadas_ia": MAXIMO_LLAMADAS_QUALITY_LOOP,
             "maximo_tokens_presupuestados": MAXIMO_TOKENS_QUALITY_LOOP,
             "maximo_tokens_salida_generador": MAXIMO_TOKENS_SALIDA_QUALITY_GENERADOR,
-            "version_configuracion": "ciel-nvidia-routing-v2",
-            "modelos_por_rol": catalogo_roles(),
+            "version_configuracion": "ciel-cli-routing-v2" if protocolo != VERSION_PROTOCOLO else "ciel-nvidia-routing-v2",
+            "modelos_por_rol": roles,
             "llamadas_ia": 0, "estado_protocolo": "planificando",
             "tokens_presupuestados": 0,
             "best_of_n": best_of_n,
@@ -496,8 +506,8 @@ def procesar_quality_loop(identificador: str) -> None:
         ejecucion.configuracion_calidad = configuracion
         sesion.commit()
 
-    proveedor = ProveedorNvidia()
-    router = RouterModelos(proveedor)
+    proveedor = ProveedorNvidia() if revisores == "nvidia" else ProveedorRolesSuscripcion()
+    router = RouterModelos(proveedor) if revisores == "nvidia" else RouterModelos(proveedor, roles)
     llamadas = 0
     tokens_presupuestados = 0
     llamadas_registradas = []
@@ -542,13 +552,13 @@ def procesar_quality_loop(identificador: str) -> None:
             llamadas = proveedor.llamadas
             tokens_presupuestados = reserva_plan * max(1, llamadas)
             llamada_fallida = _entrada_llamada_fallida(
-                "planner", catalogo_roles()["planificador"]["modelo"], error,
+                "planner", roles["planificador"]["modelo"], error,
                 time.monotonic() - inicio_planificador, reserva_plan,
                 max(1, proveedor.llamadas),
             )
             llamada_fallida["modelos_intentados"] = list(
                 getattr(router, "modelos_planificador", [])
-                or [catalogo_roles()["planificador"]["modelo"]]
+                or [roles["planificador"]["modelo"]]
             )
             llamadas_registradas.append(llamada_fallida)
         except Exception as error:
@@ -556,7 +566,7 @@ def procesar_quality_loop(identificador: str) -> None:
             with crear_sesion() as sesion:
                 ejecucion = sesion.get(Ejecucion, identificador)
                 ejecucion.estado = "bloqueada"
-                ejecucion.mensaje = f"No se pudo obtener un GeometricPlan del proveedor NVIDIA ({type(error).__name__})"
+                ejecucion.mensaje = f"No se pudo obtener un GeometricPlan del proveedor de planificación ({type(error).__name__})"
                 ejecucion.fecha_fin = fecha_actual()
                 config = dict(ejecucion.configuracion_calidad or {})
                 config.update({"estado_protocolo": _clasificar_fallo_proveedor(error),
@@ -595,7 +605,7 @@ def procesar_quality_loop(identificador: str) -> None:
                 getattr(router, "modelos_planificador", [])
                 or [getattr(respuesta_plan, "modelo", "")]
             )
-            llamada_plan["parametros"] = {"max_tokens": MAXIMO_TOKENS_NVIDIA, "temperature": 0}
+            llamada_plan["parametros"] = getattr(respuesta_plan, "perfil", None) or {"max_tokens": MAXIMO_TOKENS_NVIDIA, "temperature": 0}
             llamada_plan, tokens_presupuestados = _reservar_en_llamada(
                 llamada_plan, reserva_plan * max(1, llamadas), tokens_presupuestados
             )
@@ -613,7 +623,7 @@ def procesar_quality_loop(identificador: str) -> None:
             llamadas_respaldo = proveedor.llamadas - llamadas_antes_validacion
             if llamadas_respaldo:
                 llamadas_registradas.append(_entrada_llamada_fallida(
-                    "planner_fallback", NVIDIA_MODEL_PLANNER_FALLBACK, error,
+                    "planner_fallback", roles["planificador"]["alternativo"], error,
                     time.monotonic() - inicio_validacion_plan, reserva_plan, llamadas_respaldo,
                 ))
         except ValueError as error:
@@ -621,7 +631,7 @@ def procesar_quality_loop(identificador: str) -> None:
             llamadas_respaldo = proveedor.llamadas - llamadas_antes_validacion
             if llamadas_respaldo:
                 llamadas_registradas.append(_entrada_llamada_fallida(
-                    "planner_fallback_validation", NVIDIA_MODEL_PLANNER_FALLBACK, error,
+                    "planner_fallback_validation", roles["planificador"]["alternativo"], error,
                     time.monotonic() - inicio_validacion_plan, reserva_plan, llamadas_respaldo,
                 ))
         if error_plan_local:
@@ -663,7 +673,7 @@ def procesar_quality_loop(identificador: str) -> None:
             llamadas_respaldo = proveedor.llamadas - llamadas_antes_validacion
         if not error_plan_local and llamadas_respaldo:
             llamada_respaldo = _entrada_llamada(
-                "planner_fallback", respuesta_plan, NVIDIA_MODEL_PLANNER_FALLBACK, "nvidia_nim"
+                "planner_fallback", respuesta_plan, roles["planificador"]["alternativo"], "nvidia_nim"
             )
             llamada_respaldo["llamadas_http"] = llamadas_respaldo
             llamada_respaldo["parametros"] = {"max_tokens": MAXIMO_TOKENS_NVIDIA, "temperature": 0}
@@ -682,7 +692,7 @@ def procesar_quality_loop(identificador: str) -> None:
                 "plan_version": plan.version_esquema,
                 "planner_model": respuesta_plan.modelo,
                 "planner_provider": respuesta_plan.proveedor,
-                "planner_endpoint_logico": "chat/completions",
+                "planner_endpoint_logico": llamada_plan["endpoint_logico"],
                 "planner_response": respuesta_plan_registrada,
                 "llamadas_ia": llamadas,
                 "tokens_presupuestados": tokens_presupuestados,
@@ -743,8 +753,8 @@ def procesar_quality_loop(identificador: str) -> None:
                         estado="consultando_ia",
                         solicitud_modelo={"calidad": {"iteracion": iteracion,
                             "candidate_id": candidate_id, "parent_candidate_id": parent_id,
-                            "prompt_version": VERSION_PROTOCOLO}, "mensajes": mensajes,
-                            "plantilla": VERSION_PROTOCOLO},
+                            "prompt_version": protocolo}, "mensajes": mensajes,
+                            "plantilla": protocolo},
                     )
                     sesion.add(intento)
                     sesion.commit()
@@ -776,7 +786,7 @@ def procesar_quality_loop(identificador: str) -> None:
                     respuesta = solicitar_codigo(modelo, mensajes, esfuerzo, limite_salida)
                 except ErrorProveedor as error:
                     codigo_respaldo = None
-                    if motor == "cadquery":
+                    if motor == "cadquery" and not proveedor_cli(modelo):
                         try:
                             codigo_respaldo = generar_cadquery_de_casa(plan)
                             ast.parse(codigo_respaldo)
@@ -839,7 +849,7 @@ def procesar_quality_loop(identificador: str) -> None:
                 codigo = extraer_codigo(respuesta["texto"])
                 solicitud_base = {
                     "calidad": {"iteracion": iteracion, "candidate_id": candidate_id,
-                                "parent_candidate_id": parent_id, "prompt_version": VERSION_PROTOCOLO},
+                                "parent_candidate_id": parent_id, "prompt_version": protocolo},
                     "mensajes": mensajes,
                     "perfil": respuesta.get("perfil"), "proveedor": respuesta.get("proveedor"),
                     "finalizacion": respuesta.get("finalizacion"),
@@ -854,6 +864,7 @@ def procesar_quality_loop(identificador: str) -> None:
                     "proveedor": respuesta.get("proveedor"),
                     "modelo_solicitado": modelo, "modelo_informado": respuesta.get("modelo_informado"),
                     "endpoint_logico": ("cadquery_local" if respuesta_local else
+                                         "cli/headless" if respuesta.get("proveedor") in MODELOS_SUSCRIPCION else
                                          "chat/completions" if respuesta.get("proveedor") != "ollama"
                                          else "api/chat"),
                     "tokens_entrada": int(respuesta.get("tokens_entrada") or 0),
@@ -908,12 +919,12 @@ def procesar_quality_loop(identificador: str) -> None:
                             reserva_fallida = reserva_revisor * incremento
                             tokens_presupuestados += reserva_fallida
                             llamada_fallida = _entrada_llamada_fallida(
-                                "code_reviewer", catalogo_roles()["revisor_codigo"]["modelo"], error,
+                                "code_reviewer", roles["revisor_codigo"]["modelo"], error,
                                 time.monotonic() - inicio_revisor, reserva_revisor, incremento,
                             )
                             llamada_fallida["modelos_intentados"] = list(
                                 getattr(router, "modelos_revisor_codigo", [])
-                                or [catalogo_roles()["revisor_codigo"]["modelo"]]
+                                or [roles["revisor_codigo"]["modelo"]]
                             )
                             llamadas_registradas.append(llamada_fallida)
                             info_revisor = llamada_fallida
@@ -949,7 +960,7 @@ def procesar_quality_loop(identificador: str) -> None:
                                 getattr(router, "modelos_revisor_codigo", [])
                                 or [respuesta_revisor.modelo]
                             )
-                            info_revisor["parametros"] = {"max_tokens": 4096, "temperature": 0}
+                            info_revisor["parametros"] = getattr(respuesta_revisor, "perfil", None) or {"max_tokens": 4096, "temperature": 0}
                             info_revisor, tokens_presupuestados = _reservar_en_llamada(
                                 info_revisor, reserva_revisor * max(1, incremento), tokens_presupuestados
                             )
@@ -1076,7 +1087,7 @@ def procesar_quality_loop(identificador: str) -> None:
                                         llamadas += incremento
                                         tokens_presupuestados += reserva_visual * incremento
                                         llamada_fallida = _entrada_llamada_fallida(
-                                            "visual_reviewer", catalogo_roles()["revisor_visual"]["modelo"],
+                                            "visual_reviewer", roles["revisor_visual"]["modelo"],
                                             error, time.monotonic() - inicio_revisor,
                                             reserva_visual, incremento,
                                         )
@@ -1115,6 +1126,9 @@ def procesar_quality_loop(identificador: str) -> None:
                                         "max_tokens": 4096, "temperature": 0, "imagenes": 1,
                                         "formato_imagen": "image/png",
                                     }
+                                    if getattr(respuesta_visual, "perfil", None):
+                                        info_visual["parametros"] = {**respuesta_visual.perfil,
+                                            "imagenes": 1, "formato_imagen": "image/png"}
                                     info_visual, tokens_presupuestados = _reservar_en_llamada(
                                         info_visual, reserva_visual, tokens_presupuestados
                                     )
@@ -1161,7 +1175,7 @@ def procesar_quality_loop(identificador: str) -> None:
                                             llamadas += incremento
                                             tokens_presupuestados += reserva_critica * incremento
                                             llamada_fallida = _entrada_llamada_fallida(
-                                                "geometric_critic", catalogo_roles()["juez_textual"]["modelo"],
+                                                "geometric_critic", roles["juez_textual"]["modelo"],
                                                 error, time.monotonic() - inicio_revisor,
                                                 reserva_critica, incremento,
                                             )
@@ -1198,7 +1212,7 @@ def procesar_quality_loop(identificador: str) -> None:
                                     if critica is not None:
                                         info_critica = _entrada_llamada("geometric_critic", respuesta_critica,
                                             respuesta_critica.modelo, "nvidia_nim")
-                                        info_critica["parametros"] = {"max_tokens": 4096, "temperature": 0}
+                                        info_critica["parametros"] = getattr(respuesta_critica, "perfil", None) or {"max_tokens": 4096, "temperature": 0}
                                         info_critica, tokens_presupuestados = _reservar_en_llamada(
                                             info_critica, reserva_critica, tokens_presupuestados
                                         )
