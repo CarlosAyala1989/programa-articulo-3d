@@ -1,0 +1,38 @@
+AGENTE CIEL LIBRE — EDICIÓN LOCAL 0.3.0 PARA DOCKER DESKTOP Y OLLAMA WINDOWS
+
+Esta edición procesa las solicitudes localmente con Ollama. No utiliza API de pago
+ni suscripciones. Conserva open-loop, closed-loop, tres motores CAD, el visor,
+campañas, casos y métricas digitales. No incluye Quality Loop ni Best-of-N.
+
+Incluye los 45 prompts del usuario y crea automáticamente un lote de 1.350
+ejecuciones con cinco modelos, tres motores y ambos modos. Se inicia después de
+preparar Windows y se registra para continuar al iniciar sesión. Las respuestas
+persistidas se reutilizan tras una interrupción; los problemas operativos se
+reintentan con espera. Los fallos CAD definitivos se registran y la cola continúa.
+Resultados: Documentos\CielLibre\Resultados. No se generan mediciones físicas.
+
+Debes tener Docker Desktop y Ollama para Windows instalados y abiertos.
+Esta edición usa contenedores Linux de Docker Desktop con Hyper-V: no instala
+ni ejecuta WSL o Ubuntu. Si Docker usa WSL 2, muestra cómo cambiar a Hyper-V.
+Hyper-V requiere Windows Pro, Enterprise o Education y virtualización habilitada.
+La primera preparación descarga dependencias CAD y los cinco modelos fijados.
+Requiere Internet, 16 GB de RAM y 60 GB libres; se recomiendan 32 GB de RAM.
+Asigna al menos 6 GB a Docker Desktop (recomendados 8 GB). Si se interrumpe una
+descarga, vuelve a abrir el acceso directo para continuar.
+La inferencia puede usar CPU y será más lenta sin GPU compatible y su controlador.
+
+Los dos modelos Qwen seleccionados tienen licencia Apache 2.0. Gemma 3 utiliza
+los Gemma Terms of Use, que son diferentes de Apache 2.0 y establecen condiciones
+de uso. El instalador incluye los textos suministrados por las fuentes de modelos
+en programa/datos/modelos_libres y conserva su origen y hashes.
+
+Gemma Terms of Use: https://ai.google.dev/gemma/terms
+Qwen: https://huggingface.co/Qwen/Qwen3.5-0.8B
+Ollama: https://github.com/ollama/ollama/blob/main/LICENSE
+Docker Engine: https://github.com/moby/moby/blob/master/LICENSE
+Docker Desktop: https://docs.docker.com/desktop/setup/install/windows-install/
+
+El coste de electricidad y del equipo no está estimado. La validez y exportación
+CAD no certifican por sí solas la fidelidad de la geometría a la descripción.
+Las campañas y archivos se guardan localmente. Al retirar los accesos directos,
+el desinstalador conserva los datos y modelos para impedir pérdida de resultados.

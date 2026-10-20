@@ -1,0 +1,8 @@
+{
+  "version": "ciel-instalador-libre-v2-windows",
+  "puerto": 8010,
+  "proyecto": "agente-ciel-libre-windows",
+  "ollama_windows": "http://127.0.0.1:11434",
+  "ollama_contenedores": "http://host.docker.internal:11434",
+  "requisitos": "Docker Desktop en modo Linux con Hyper-V y Ollama para Windows instalados por el usuario"
+}

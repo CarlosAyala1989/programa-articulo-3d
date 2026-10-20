@@ -1,0 +1,23 @@
+{
+  "version": "ciel-instalador-windows-nativo-v1",
+  "python": {
+    "archivo": "python-3.11.9-amd64.exe",
+    "url": "https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe",
+    "sha256": "5ee42c4eee1e6b4464bb23722f90b45303f79442df63083f05322f1785f5fdde"
+  },
+  "freecad": {
+    "archivo": "FreeCAD_1.1.3-Windows-x86_64-py311.7z",
+    "url": "https://github.com/FreeCAD/FreeCAD/releases/download/1.1.3/FreeCAD_1.1.3-Windows-x86_64-py311.7z",
+    "sha256": "9c6959dc9c4dba64dd818a62447e3dfedb4221d776fb044b239d462f150bcec4",
+    "bytes": 418053398
+  },
+  "version_instalador": "0.5.0",
+  "extractor_7zip": {
+    "version": "26.04",
+    "archivo": "herramientas/7zr.exe",
+    "url": "https://github.com/ip7z/7zip/releases/download/26.04/7zr.exe",
+    "sha256": "256feca8e274e5da655e2a284fabafd9f554365eb164862089dacd4e8276d282",
+    "bytes": 602624,
+    "distribucion": "incluido en el instalador; no instala 7-Zip en el sistema"
+  }
+}

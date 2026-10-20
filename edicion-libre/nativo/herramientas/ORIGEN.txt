@@ -1,0 +1,5 @@
+7-Zip 26.04, 7zr.exe oficial sin modificaciones.
+Fuente: https://github.com/ip7z/7zip/releases/download/26.04/7zr.exe
+SHA256: 256feca8e274e5da655e2a284fabafd9f554365eb164862089dacd4e8276d282
+Código fuente: https://github.com/ip7z/7zip/tree/26.04
+Este binario Windows se incluye como recurso y no se ejecuta en Ubuntu.
