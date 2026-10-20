@@ -1,0 +1,12 @@
+.git
+*.pdf
+*.pptx
+agente_ciel_simulador.html
+agente_ciel_workspace_driver.html
+*.md
+**/__pycache__
+**/.pytest_cache
+**/node_modules
+**/dist
+.env
+*.env

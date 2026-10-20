@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f5f5f7" />
+    <script>
+      let temaInicial;
+      try { temaInicial = localStorage.getItem('ciel_tema'); } catch {}
+      document.documentElement.dataset.tema = ['claro', 'oscuro'].includes(temaInicial)
+        ? temaInicial : (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'oscuro' : 'claro');
+    </script>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23c8323b'/%3E%3Ctext x='32' y='45' text-anchor='middle' font-family='sans-serif' font-size='43' font-weight='bold' fill='%23ffffff'%3EC%3C/text%3E%3C/svg%3E" />
+    <title>Agente Ciel Libre · Estudio CAD digital</title>
+  </head>
+  <body>
+    <div id="raiz"></div>
+    <script type="module" src="/src/principal.jsx"></script>
+  </body>
+</html>

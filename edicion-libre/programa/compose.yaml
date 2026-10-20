@@ -1,0 +1,86 @@
+name: agente-ciel-libre
+services:
+  postgres:
+    image: postgres:16-bookworm
+    environment:
+      POSTGRES_DB: ciel
+      POSTGRES_USER: ciel
+      POSTGRES_PASSWORD: ciel_local
+    volumes: ["base_datos:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ciel -d ciel"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+  redis:
+    image: redis:7-bookworm
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes: ["cola:/data"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+  api:
+    image: ciel-libre-aplicacion:v1
+    build: {context: ., dockerfile: aplicacion/Dockerfile}
+    command: ["uvicorn", "aplicacion.api:aplicacion", "--host", "0.0.0.0", "--port", "8000"]
+    ports: ["127.0.0.1:8010:8000"]
+    volumes: ["artefactos:/datos", "./modelos_instalados.json:/servicio/modelos_instalados.json:ro", "${CIEL_DIRECTORIO_RESULTADOS:-./resultados}:/salida"]
+    environment: &entorno_local
+      CIEL_AUTOMATICO: "1"
+      DIRECTORIO_RESULTADOS: /salida
+      OLLAMA_L01: ciel-libre-qwen-08b:q8_0
+      OLLAMA_L02: ciel-libre-qwen-2b:q8_0
+      OLLAMA_L03: ciel-libre-gemma-4b:q5_k_m
+      OLLAMA_L04: ciel-libre-ministral-3b:q6_k
+      OLLAMA_L05: ciel-libre-smollm3-3b:q6_k
+      URL_OLLAMA: http://host.docker.internal:11434
+      DEEPSEEK_API_KEY: ""
+      NVIDIA_API_KEY: ""
+      CLI_LOCAL_HABILITADO: "0"
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    restart: unless-stopped
+  trabajador:
+    image: ciel-libre-aplicacion:v1
+    build: {context: ., dockerfile: aplicacion/Dockerfile}
+    command: ["python", "-m", "aplicacion.iniciar_trabajador"]
+    volumes: ["artefactos:/datos", "./modelos_instalados.json:/servicio/modelos_instalados.json:ro", "${CIEL_DIRECTORIO_RESULTADOS:-./resultados}:/salida"]
+    environment: *entorno_local
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      supervisor: {condition: service_started}
+      evaluador: {condition: service_started}
+    restart: unless-stopped
+  supervisor:
+    image: ciel-libre-supervisor:v1
+    build: {context: ., dockerfile: supervisor/Dockerfile}
+    volumes: ["/var/run/docker.sock:/var/run/docker.sock"]
+    depends_on: [evaluador]
+    restart: unless-stopped
+  evaluador:
+    image: ciel-libre-evaluador:v1
+    build: {context: ., dockerfile: evaluador/Dockerfile}
+    volumes: ["artefactos:/datos"]
+    restart: unless-stopped
+  imagen_cadquery:
+    profiles: [imagenes]
+    image: ciel-libre-cadquery:v1
+    build: {context: ., dockerfile: motores/cadquery/Dockerfile}
+  imagen_build123d:
+    profiles: [imagenes]
+    image: ciel-libre-build123d:v1
+    build: {context: ., dockerfile: motores/build123d/Dockerfile}
+  imagen_freecad:
+    profiles: [imagenes]
+    image: ciel-libre-freecad:v1
+    build: {context: ., dockerfile: motores/freecad/Dockerfile}
+volumes:
+  base_datos:
+  cola:
+  artefactos:

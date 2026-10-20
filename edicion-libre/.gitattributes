@@ -1,0 +1,3 @@
+# Conservar literalmente los prompts y activos de autores con hashes fijados.
+programa/datos/45_prompts_Agente_Ciel.md -whitespace
+programa/datos/modelos_libres/** -whitespace

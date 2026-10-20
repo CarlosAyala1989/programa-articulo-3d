@@ -1,0 +1,21 @@
+<|im_start|>system
+## Metadata
+
+Knowledge Cutoff Date: June 2025
+Reasoning Mode: /no_think
+
+## Custom Instructions
+
+{{ range .Messages }}{{ if eq .Role "system" }}{{ .Content }}
+{{ end }}{{ end }}<|im_end|>
+{{ range .Messages }}{{ if eq .Role "user" }}<|im_start|>user
+{{ .Content }}<|im_end|>
+{{ else if eq .Role "assistant" }}<|im_start|>assistant
+<think>
+
+</think>
+{{ .Content }}<|im_end|>
+{{ end }}{{ end }}<|im_start|>assistant
+<think>
+
+</think>

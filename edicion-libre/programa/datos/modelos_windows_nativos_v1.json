@@ -1,0 +1,11 @@
+{
+  "version": "ciel-modelos-windows-existentes-v1",
+  "contexto": 16384,
+  "modelos": [
+    {"codigo": "L01", "nombre": "Qwen 3.5 0.8B", "etiqueta": "qwen3.5:0.8b-q8_0", "cuantizacion": "Q8_0", "digest_reportado_prefijo": "7c00f78aed0f"},
+    {"codigo": "L02", "nombre": "Qwen 3.5 2B", "etiqueta": "qwen3.5:2b-q8_0", "cuantizacion": "Q8_0", "digest_reportado_prefijo": "0689d44085e0"},
+    {"codigo": "L03", "nombre": "Gemma 3 4B IT", "etiqueta": "gemma3:4b-it-q8_0", "cuantizacion": "Q8_0", "digest_reportado_prefijo": "69f0d5459ab0"},
+    {"codigo": "L04", "nombre": "Ministral 3 3B Instruct (LM Studio)", "etiqueta": "hf.co/lmstudio-community/Ministral-3-3B-Instruct-2512-GGUF:Q6_K", "cuantizacion": "Q6_K", "digest_reportado_prefijo": "3e165cc998b0"},
+    {"codigo": "L05", "nombre": "SmolLM3 3B (Impulse2000)", "etiqueta": "Impulse2000/smollm3:3b-q6_k", "cuantizacion": "Q6_K", "digest_reportado_prefijo": "01561ef3639a"}
+  ]
+}

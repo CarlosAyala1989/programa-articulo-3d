@@ -1,0 +1,96 @@
+{
+  "version": "ciel-modelos-libres-v1",
+  "contexto": 16384,
+  "modelos": [
+    {
+      "codigo": "L01",
+      "nombre": "Qwen 3.5 0.8B",
+      "etiqueta": "ciel-libre-qwen-08b:q8_0",
+      "cuantizacion": "Q8_0",
+      "fuente": "https://ollama.com/library/qwen3.5:0.8b-q8_0",
+      "licencia": "Apache-2.0",
+      "url": "https://registry.ollama.ai/v2/library/qwen3.5/blobs/sha256:889ea3b9143cdc32146c7d530ce5f3d452ec18069086f6f4167ce9ae72a9691f",
+      "sha256": "889ea3b9143cdc32146c7d530ce5f3d452ec18069086f6f4167ce9ae72a9691f",
+      "bytes": 811843520,
+      "plantilla": "L01.template",
+      "licencia_archivo": "L01.license",
+      "plantilla_sha256": "b507b9c2f6ca642bffcd06665ea7c91f235fd32daeefdf875a0f938db05fb315",
+      "licencia_sha256": "50cbab8a892c5f2993b8c7351a99182507472def3b1374558308605d99b86b32",
+      "paradas": []
+    },
+    {
+      "codigo": "L02",
+      "nombre": "Qwen 3.5 2B",
+      "etiqueta": "ciel-libre-qwen-2b:q8_0",
+      "cuantizacion": "Q8_0",
+      "fuente": "https://ollama.com/library/qwen3.5:2b-q8_0",
+      "licencia": "Apache-2.0",
+      "url": "https://registry.ollama.ai/v2/library/qwen3.5/blobs/sha256:e8bf47d40c5ba68baf8f3e503ee36710da6e8641cb0a670a508cff5b3f0cfbf7",
+      "sha256": "e8bf47d40c5ba68baf8f3e503ee36710da6e8641cb0a670a508cff5b3f0cfbf7",
+      "bytes": 2012012448,
+      "plantilla": "L02.template",
+      "licencia_archivo": "L02.license",
+      "plantilla_sha256": "b507b9c2f6ca642bffcd06665ea7c91f235fd32daeefdf875a0f938db05fb315",
+      "licencia_sha256": "50cbab8a892c5f2993b8c7351a99182507472def3b1374558308605d99b86b32",
+      "paradas": []
+    },
+    {
+      "codigo": "L03",
+      "nombre": "Gemma 3 4B IT",
+      "etiqueta": "ciel-libre-gemma-4b:q5_k_m",
+      "cuantizacion": "Q5_K_M",
+      "fuente": "https://huggingface.co/unsloth/gemma-3-4b-it-GGUF",
+      "revision": "5a3566e716d80f709ed7b79817eaf7733d2a1fce",
+      "licencia": "Gemma Terms of Use",
+      "url": "https://huggingface.co/unsloth/gemma-3-4b-it-GGUF/resolve/5a3566e716d80f709ed7b79817eaf7733d2a1fce/gemma-3-4b-it-Q5_K_M.gguf",
+      "sha256": "974e5c2f13c321fc3258b6fbf2ce326a09d8ace511aa6846df1db62baf7df7d4",
+      "bytes": 2829698176,
+      "plantilla": "gemma3.template",
+      "licencia_archivo": "gemma3.license",
+      "plantilla_sha256": "e0a42594d802e5d31cdc786deb4823edb8adff66094d49de8fffe976d753e348",
+      "licencia_sha256": "dd084c7d92a3c1c14cc09ae77153b903fd2024b64a100a0cc8ec9316063d2dbc",
+      "paradas": [
+        "<end_of_turn>"
+      ]
+    },
+    {
+      "codigo": "L04",
+      "nombre": "Ministral 3 3B Instruct",
+      "etiqueta": "ciel-libre-ministral-3b:q6_k",
+      "cuantizacion": "Q6_K",
+      "fuente": "https://huggingface.co/unsloth/Ministral-3-3B-Instruct-2512-GGUF",
+      "revision": "7564922f37fa5bbb62b87f09a55c12f1f91d7a6a",
+      "licencia": "Apache-2.0",
+      "url": "https://huggingface.co/unsloth/Ministral-3-3B-Instruct-2512-GGUF/resolve/7564922f37fa5bbb62b87f09a55c12f1f91d7a6a/Ministral-3-3B-Instruct-2512-Q6_K.gguf",
+      "sha256": "ca22c676b97aad1d50952416f44ddd6d8130e24c11c474aed5e8865dd7e35297",
+      "bytes": 2821256480,
+      "plantilla": "L04.template",
+      "licencia_archivo": "L04.license",
+      "plantilla_sha256": "24c6226aca35b16350187fb9125e7cb4e746795c78edd3cb1de45654c7e77181",
+      "licencia_sha256": "43070e2d4e532684de521b885f385d0841030efa2b1a20bafb76133a5e1379c1",
+      "paradas": []
+    },
+    {
+      "codigo": "L05",
+      "nombre": "SmolLM3 3B",
+      "etiqueta": "ciel-libre-smollm3-3b:q6_k",
+      "cuantizacion": "Q6_K",
+      "fuente": "https://huggingface.co/unsloth/SmolLM3-3B-GGUF",
+      "revision": "a7bc17204c8a326d6bd6e466e076959eddae2025",
+      "licencia": "Apache-2.0",
+      "url": "https://huggingface.co/unsloth/SmolLM3-3B-GGUF/resolve/a7bc17204c8a326d6bd6e466e076959eddae2025/SmolLM3-3B-Q6_K.gguf",
+      "sha256": "e11c5af94a7beb95dc1352f8395d47a50ea12d017f979e29945b08e496f9096b",
+      "bytes": 2530861600,
+      "plantilla": "L05.template",
+      "licencia_archivo": "L05.license",
+      "plantilla_fuente": "https://huggingface.co/HuggingFaceTB/SmolLM3-3B/resolve/a07cc9a04f16550a088caea529712d1d335b0ac1/chat_template.jinja",
+      "plantilla_sha256": "31c97b36ed64c5731e6d75e2e3a1fedb26dfcfd8065300f5e0d7c69e097bbece",
+      "licencia_sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "paradas": [
+        "<|im_end|>",
+        "<|im_start|>"
+      ],
+      "plantilla_perfil": "Conversación de texto sin herramientas; /no_think; fecha dinámica omitida"
+    }
+  ]
+}

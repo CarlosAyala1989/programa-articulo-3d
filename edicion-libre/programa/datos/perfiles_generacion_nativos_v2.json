@@ -1,0 +1,14 @@
+{
+  "version": "ciel-nativo-windows-v2",
+  "protocolo_lote": "ciel-lote-45-windows-nativo-v2",
+  "num_predict": -1,
+  "maximo_bytes_codigo": 1048576,
+  "timeout_ollama_segundos": 21600,
+  "contextos": {
+    "L01": 98304,
+    "L02": 98304,
+    "L03": 98304,
+    "L04": 98304,
+    "L05": 65536
+  }
+}

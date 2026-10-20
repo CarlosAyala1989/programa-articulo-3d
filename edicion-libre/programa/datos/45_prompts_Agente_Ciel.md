@@ -1,0 +1,233 @@
+# Dataset de 45 prompts CAD — Agente-Ciel
+
+**Proyecto:** Agente-Ciel — Generación CAD paramétrica mediante modelos de lenguaje  
+**Total de casos:** 45  
+**Distribución:** 15 básicos (B01–B15), 15 intermedios (M01–M15) y 15 complejos (C01–C15)  
+**Unidades:** milímetros (mm), salvo que se indique otra cosa.  
+**Uso recomendado:** campaña piloto de generación y validación de componentes mecánicos.
+
+> **Nota metodológica:** El documento complementario de resultados propone entre 50 y 100 prompts para la campaña experimental principal. Este conjunto de 45 casos se propone como una campaña piloto; no reemplaza por sí solo ese mínimo. Los prompts están redactados como requisitos de diseño, no como afirmaciones de que todas las piezas sean fabricables o funcionalmente certificadas.
+
+## 0. Prompt de sistema común (reutilizable)
+
+Usar este texto como instrucción de sistema en las ejecuciones, manteniendo una versión congelada al comparar *open-loop* y *closed-loop*:
+
+```text
+Eres un ingeniero experto en CAD paramétrico y CadQuery. Convierte la descripción de la pieza en un script Python ejecutable usando CadQuery y OpenCASCADE.
+
+Utiliza milímetros como unidad. Declara los parámetros geométricos editables al inicio del script. Construye una representación B-Rep válida y asigna la geometría final a la variable result.
+
+Conserva exactamente las dimensiones, cantidades, posiciones y relaciones especificadas. No agregues elementos no solicitados ni sustituyas perfiles técnicos por aproximaciones sin declararlo.
+
+Genera un único sólido conectado salvo indicación contraria. Exporta output.stl y output.step. Devuelve solamente código Python ejecutable.
+```
+
+## 1. Nivel básico — 15 prompts
+
+**Objetivo:** evaluar primitivas geométricas, operaciones de extrusión, cortes, agujeros y uniones sencillas.
+
+### B01 — Placa rectangular perforada
+
+Genera una placa mecánica rectangular de 80 mm de largo, 50 mm de ancho y 5 mm de espesor. Incluye cuatro agujeros pasantes de 6 mm de diámetro, situados a 10 mm de los dos bordes más cercanos en cada esquina. Mantén todas las caras planas y las dimensiones parametrizables.
+
+### B02 — Arandela circular
+
+Diseña una arandela mecánica con diámetro exterior de 32 mm, diámetro interior de 12 mm y espesor de 4 mm. El agujero debe ser concéntrico y completamente pasante. Aplica chaflanes de 0,5 mm en los bordes circulares exteriores superiores e inferiores.
+
+### B03 — Espaciador tubular
+
+Genera un espaciador cilíndrico hueco de 24 mm de diámetro exterior, 10 mm de diámetro interior y 20 mm de longitud axial. El conducto interior debe atravesar toda la pieza. Conserva extremos planos y paredes uniformes.
+
+### B04 — Eje mecánico escalonado
+
+Diseña un eje sólido compuesto por tres segmentos cilíndricos coaxiales consecutivos: diámetro 16 mm y longitud 20 mm; diámetro 12 mm y longitud 30 mm; diámetro 8 mm y longitud 15 mm. La longitud total debe ser 65 mm. Une los segmentos en un solo sólido.
+
+### B05 — Bloque con perforación central
+
+Genera un bloque rectangular de 60 × 30 × 20 mm. Incorpora un agujero cilíndrico vertical pasante de 10 mm de diámetro, ubicado exactamente en el centro de la cara superior.
+
+### B06 — Brida cuadrada de montaje
+
+Diseña una brida cuadrada de 60 × 60 mm y 6 mm de espesor. Agrega una perforación central pasante de 18 mm de diámetro y cuatro agujeros pasantes de 6 mm, cuyos centros se encuentren a 10 mm de cada par de bordes adyacentes.
+
+### B07 — Base con resalte cilíndrico
+
+Genera una placa rectangular de 50 × 40 × 5 mm. Añade en el centro superior un resalte cilíndrico de 20 mm de diámetro y 12 mm de altura adicional. Incorpora un agujero axial de 8 mm de diámetro que atraviese el resalte y la placa.
+
+### B08 — Placa triangular de refuerzo
+
+Diseña una placa triangular rectángula con catetos de 60 mm y 45 mm, y espesor uniforme de 6 mm. Coloca un agujero pasante de 6 mm de diámetro cuyo centro esté a 15 mm y 12 mm de los respectivos catetos, medidos desde el vértice recto.
+
+### B09 — Soporte angular en L
+
+Genera un soporte mecánico formado por una base horizontal de 60 × 30 mm y una pared vertical de 50 mm de altura total, ambas de 6 mm de espesor. Coloca un agujero pasante de 6 mm en cada sección, centrado en su anchura y perpendicular a la cara correspondiente.
+
+### B10 — Biela plana de dos agujeros
+
+Diseña una biela plana de 80 mm de longitud total, 20 mm de anchura y 6 mm de espesor, con extremos semicirculares de radio 10 mm. Incluye un agujero pasante de 8 mm de diámetro en el centro de cada extremo; la separación entre centros debe ser 60 mm.
+
+### B11 — Rueda mecánica lisa
+
+Genera una rueda cilíndrica simple de 60 mm de diámetro exterior y 10 mm de espesor. Incorpora un agujero axial pasante de 12 mm de diámetro. Mantén ambas superficies frontales planas.
+
+### B12 — Perfil estructural en U
+
+Diseña un perfil mecánico de sección transversal en U, con 80 mm de longitud, 40 mm de anchura exterior y 25 mm de altura exterior. La base y las dos paredes laterales tendrán un espesor uniforme de 4 mm. La parte superior estará abierta.
+
+### B13 — Cuña mecánica
+
+Genera una cuña sólida de 50 mm de longitud y 30 mm de anchura. La altura debe variar linealmente desde 8 mm en un extremo hasta 20 mm en el extremo opuesto. Conserva plana la superficie inferior y continua la superficie superior inclinada.
+
+### B14 — Placa con ranura oblonga
+
+Diseña una placa rectangular de 70 × 30 × 5 mm. En su centro, incorpora una ranura pasante oblonga de 30 mm de longitud total y 8 mm de anchura, con extremos semicirculares de radio 4 mm. La ranura debe orientarse paralelamente al lado largo.
+
+### B15 — Tapa cilíndrica hueca
+
+Genera una tapa con forma de vaso cilíndrico, de diámetro exterior 44 mm y altura total 25 mm. Debe poseer paredes laterales de 3 mm y fondo cerrado de 4 mm de espesor. La abertura circular superior debe permanecer completamente abierta.
+
+## 2. Nivel intermedio — 15 prompts
+
+**Objetivo:** evaluar geometrías compuestas, cavidades, ranuras, patrones repetitivos, operaciones booleanas múltiples y relaciones dimensionales.
+
+### M01 — Abrazadera circular abierta
+
+Diseña una abrazadera en forma de anillo abierto, de 42 mm de diámetro exterior, 25 mm de diámetro interior y 12 mm de altura. Incorpora una abertura radial de 3 mm de anchura que atraviese completamente un sector del anillo. Conserva el resto del cuerpo como un sólido conectado.
+
+### M02 — Polea con dos pestañas
+
+Genera una polea mecánica de 76 mm de diámetro máximo y 24 mm de anchura total. Incluye dos pestañas laterales de 6 mm de espesor axial, una zona central de 12 mm de anchura y 62 mm de diámetro, y un agujero axial de 12 mm. La geometría debe ser simétrica respecto al plano central.
+
+### M03 — Carcasa electrónica abierta
+
+Diseña una carcasa rectangular abierta superiormente, de dimensiones exteriores 100 × 70 × 40 mm, paredes de 3 mm y base de 4 mm. Incorpora cuatro postes cilíndricos interiores de 10 mm de diámetro y 12 mm de altura sobre el fondo, situados simétricamente cerca de las esquinas interiores. Cada poste tendrá una perforación axial ciega de 3,5 mm de diámetro y 10 mm de profundidad.
+
+### M04 — Tapa para carcasa electrónica
+
+Genera una tapa compatible con una carcasa de 100 × 70 mm de dimensiones exteriores y paredes de 3 mm. La tapa tendrá una placa superior de 100 × 70 × 4 mm y un faldón rectangular inferior de 7 mm de altura, 2 mm de espesor y dimensiones exteriores de 93,4 × 63,4 mm, para proporcionar 0,3 mm de holgura por lado respecto a la cavidad de la carcasa.
+
+### M05 — Placa de montaje de motor
+
+Diseña una placa de 100 × 80 × 6 mm. Incluye un agujero central pasante de 28 mm de diámetro y cuatro ranuras oblongas pasantes de 18 × 6 mm. Distribuye los centros de las ranuras simétricamente en coordenadas X = ±32 mm e Y = ±23 mm respecto al centro de la placa.
+
+### M06 — Brida circular multiperforada
+
+Genera una brida de 90 mm de diámetro exterior y 8 mm de espesor, con agujero central de 26 mm. Incluye seis perforaciones pasantes de 7 mm de diámetro, distribuidas uniformemente cada 60 grados sobre un círculo de centros de 68 mm de diámetro.
+
+### M07 — Leva circular excéntrica
+
+Diseña una leva de disco de 60 mm de diámetro exterior y 12 mm de espesor. Incluye un agujero pasante de 12 mm de diámetro cuyo eje sea paralelo al eje del disco, pero esté desplazado 8 mm respecto al centro geométrico. La excentricidad debe ser parametrizable.
+
+### M08 — Acoplamiento de ejes escalonado
+
+Genera un acoplamiento cilíndrico de 36 mm de diámetro exterior y 50 mm de longitud. Desde un extremo debe existir un agujero axial de 10 mm de diámetro y 25 mm de profundidad, y desde el otro uno de 14 mm de diámetro y 25 mm de profundidad, conectados coaxialmente. Añade un chavetero longitudinal de 4 mm de anchura y 2 mm de profundidad radial, con 18 mm de longitud desde el extremo del agujero mayor.
+
+### M09 — Brazo tensor de correa
+
+Diseña un brazo mecánico plano de 110 mm de longitud total, 25 mm de anchura y 10 mm de espesor, con extremos semicirculares. Incorpora perforaciones de 10 mm de diámetro en los centros de ambos extremos, separadas 85 mm. En el centro longitudinal, agrega una ranura oblonga pasante de 30 × 6 mm.
+
+### M10 — Cremallera dentada recta
+
+Genera una cremallera mecánica de 100 mm de longitud, 20 mm de anchura y 10 mm de altura de base. Sobre su cara superior incorpora 10 dientes trapezoidales de 5 mm de altura, separados por un paso uniforme de 9 mm, con anchura de 6 mm en la base y 4 mm en la parte superior. Extiende cada diente a lo ancho de la cremallera.
+
+### M11 — Soporte angular con nervadura
+
+Diseña un soporte en L con base de 90 × 50 × 6 mm y pared vertical de 60 mm de altura total y 6 mm de espesor. Incorpora una nervadura triangular central de 6 mm de grosor, que una la base y la pared. Agrega dos agujeros de 6 mm en la base y uno de 8 mm en la pared vertical, con posiciones simétricas y separación suficiente de los bordes.
+
+### M12 — Soporte de articulación tipo horquilla
+
+Genera un soporte en U con base de 80 × 44 × 6 mm y dos orejas laterales de 7 mm de espesor, elevadas hasta una altura total de 32 mm. El espacio interior libre entre orejas debe ser 30 mm. Perfora las orejas con agujeros coaxiales de 8 mm de diámetro, a una altura de 22 mm desde la superficie inferior.
+
+### M13 — Bloque distribuidor con conductos
+
+Diseña un bloque rectangular de 80 × 36 × 30 mm. Incorpora un conducto cilíndrico principal de 12 mm de diámetro que atraviese longitudinalmente el bloque por su centro. Añade dos conductos verticales de 6 mm de diámetro, ubicados a 22 mm a cada lado del centro longitudinal, desde la cara superior hasta intersectar el conducto principal.
+
+### M14 — Guía mecánica de cola de milano
+
+Genera un riel longitudinal de 80 mm de longitud. La base rectangular tendrá 34 mm de ancho y 5 mm de altura. Encima construye un perfil trapezoidal de cola de milano, de 24 mm de ancho inferior, 18 mm de ancho superior y 8 mm de altura adicional. Centra ambos perfiles y únelos en un sólido continuo.
+
+### M15 — Hoja de bisagra con casquillos
+
+Diseña una hoja rectangular de bisagra de 75 × 35 × 5 mm. Incorpora dos casquillos cilíndricos integrados a lo largo de uno de sus bordes mayores, de diámetro exterior 12 mm, diámetro interior 6 mm y longitud axial 14 mm cada uno, separados entre sí. Sus ejes deben ser coaxiales y paralelos al lado largo. Agrega dos agujeros pasantes de montaje de 5 mm en la placa.
+
+## 3. Nivel complejo — 15 prompts
+
+**Objetivo:** evaluar perfiles matemáticos de ingeniería, operaciones geométricas interdependientes, tolerancias de ensamblaje, curvas, patrones complejos y generación de componentes mecánicos funcionales.
+
+### C01 — Engranaje recto de perfil evolvente
+
+Diseña un engranaje cilíndrico recto con 20 dientes, módulo 2 mm, ángulo de presión de 20 grados y espesor axial de 10 mm. Genera perfiles de dientes mediante la geometría evolvente del círculo base, con diámetro primitivo de 40 mm, diámetro exterior de 44 mm y diámetro de raíz teórico de 35 mm. Incorpora un agujero axial de 8 mm de diámetro y un chavetero de 3 mm de anchura y 1,5 mm de profundidad radial. No sustituyas el perfil evolvente por dientes rectangulares.
+
+### C02 — Engranaje compuesto de dos etapas
+
+Genera una pieza de transmisión formada por dos engranajes rectos coaxiales, solidarios y unidos axialmente. El engranaje mayor tendrá 24 dientes, módulo 1,5 mm y 8 mm de espesor; el menor tendrá 12 dientes, el mismo módulo y 8 mm de espesor. Ambos utilizarán perfiles evolventes de 20 grados y compartirán un agujero axial de 6 mm. La longitud axial total será 16 mm.
+
+### C03 — Engranaje helicoidal
+
+Diseña un engranaje helicoidal de 18 dientes, módulo normal 2 mm, ángulo de presión normal de 20 grados, ángulo de hélice de 15 grados hacia la derecha y anchura de cara de 16 mm. Incorpora un agujero central de 10 mm de diámetro. Construye perfiles evolventes helicoidales continuos y conserva parametrizables los ángulos, el módulo y el número de dientes.
+
+### C04 — Corona dentada de engranaje interno
+
+Genera una corona circular con 36 dientes internos de perfil evolvente, módulo 2 mm, ángulo de presión de 20 grados y diámetro primitivo de 72 mm. El diámetro exterior del anillo será 100 mm y su espesor axial 12 mm. Construye los dientes orientados hacia el centro, con diámetro de punta teórico de 68 mm y diámetro de raíz teórico de 77 mm. Verifica que las cavidades y dientes interiores no se autointersecten.
+
+### C05 — Carcasa con pestañas flexibles de cierre
+
+Diseña una carcasa rectangular de dimensiones exteriores 120 × 80 × 45 mm, espesor de pared 3 mm y fondo de 4 mm, abierta superiormente. Incorpora cuatro lengüetas flexibles integradas en las paredes largas, dos por lado y distribuidas simétricamente. Cada lengüeta tendrá 10 mm de anchura, 2 mm de espesor, longitud libre de 12 mm y un gancho de retención con saliente de 0,8 mm y rampa de entrada. Mantén las lengüetas conectadas a la carcasa.
+
+### C06 — Tapa con cierre por encaje
+
+Genera una tapa paramétrica compatible con una carcasa rectangular de dimensiones exteriores 120 × 80 mm, espesor de pared de 3 mm y cuatro lengüetas flexibles, dos por lado largo, ubicadas simétricamente. Construye una placa superior de 120 × 80 × 4 mm y un faldón de 8 mm de altura y 2,5 mm de espesor, con dimensiones exteriores de 113,4 × 73,4 mm para una holgura lateral de 0,3 mm. Incorpora cuatro ventanas de retención de 12 × 3 mm alineadas con las lengüetas.
+
+### C07 — Carcasa ventilada con deflectores
+
+Diseña una carcasa protectora rectangular abierta superiormente de 120 × 90 × 50 mm, con paredes de 3 mm y base de 4 mm. En una pared larga incorpora seis ranuras de ventilación de 18 × 3 mm, distribuidas uniformemente y situadas por encima de la base. Añade deflectores interiores unidos al cuerpo y desplazados respecto a las ranuras, formando un recorrido indirecto para el aire y evitando una línea de paso recta por las aberturas.
+
+### C08 — Carcasa mecánica de reductor
+
+Genera una carcasa rectangular de reductor de 130 × 100 × 55 mm, con base de 5 mm y paredes de 4 mm, abierta superiormente. Incluye dos pares de alojamientos cilíndricos coaxiales de 22 mm de diámetro en las paredes frontal y posterior, con ejes horizontales paralelos y separados 50 mm entre sí. Sus centros estarán a 28 mm de altura desde la base. Incorpora cuatro postes interiores de montaje de 12 mm de diámetro, 12 mm de altura y taladros ciegos de 3,5 mm.
+
+### C09 — Eslabón de dedo protésico articulado
+
+Diseña un eslabón experimental de dedo protésico de 72 mm de longitud, 20 mm de anchura y 12 mm de espesor. En el extremo distal incorpora una horquilla bifurcada con una abertura central de 8 mm y profundidad de 18 mm, dejando dos brazos de 6 mm de anchura. Perfora ambos brazos con agujeros coaxiales de 5 mm de diámetro. En el extremo proximal añade un agujero pasante perpendicular al plano principal de 6 mm de diámetro. Redondea los bordes externos con radios de 2 mm donde sea geométricamente viable.
+
+### C10 — Biela protésica curva
+
+Genera una biela curva experimental para una articulación protésica, con trayectoria central definida por un arco circular de radio 55 mm y ángulo central de 70 grados. El cuerpo tendrá anchura de 16 mm y espesor de 9 mm. En ambos extremos incorpora orejetas circulares de 22 mm de diámetro exterior con agujeros pasantes de 6 mm, centrados en los extremos de la trayectoria. Mantén continuidad tangencial entre la barra curva y las orejetas.
+
+### C11 — Adaptador protésico ovalado ajustable
+
+Diseña una manga experimental de adaptación protésica, sin finalidad de uso clínico, de 45 mm de altura. La sección transversal exterior será elíptica de 62 × 52 mm y la interior de 52 × 42 mm, con ejes coincidentes. Incorpora una abertura longitudinal completa de 10 mm de anchura en uno de sus lados y cuatro ventanas laterales de alivio de 16 × 5 mm, distribuidas simétricamente sobre las paredes restantes. Conserva bordes suavizados con radio máximo de 1,5 mm.
+
+### C12 — Leva de disco con ranura sinusoidal
+
+Genera una leva circular de 80 mm de diámetro y 12 mm de espesor, con perforación axial central de 10 mm. Sobre la cara superior construye una ranura continua cerrada de 5 mm de anchura y 4 mm de profundidad, cuya trayectoria central en coordenadas polares esté definida por r(θ) = 25 + 5·sen(2θ), para θ entre 0 y 360 grados. La trayectoria debe ser suave, periódica y no autointersectarse.
+
+### C13 — Rueda de trinquete
+
+Diseña una rueda de trinquete de 24 dientes asimétricos, 80 mm de diámetro exterior, 70 mm de diámetro de raíz y 10 mm de espesor. Cada diente debe poseer un flanco de bloqueo aproximadamente radial y un flanco inclinado de avance, distribuidos con un paso angular de 15 grados. Incorpora un agujero axial pasante de 12 mm y conserva la continuidad del perfil dentado.
+
+### C14 — Impulsor centrífugo de álabes curvos
+
+Genera un impulsor centrífugo de una sola pieza, compuesto por un disco base de 90 mm de diámetro y 5 mm de espesor, un cubo axial de 24 mm de diámetro y 20 mm de altura total desde la base inferior, y ocho álabes curvos idénticos. Cada álabe tendrá 2,5 mm de espesor, altura de 15 mm desde el disco y se extenderá desde un radio de 14 mm hasta 42 mm, siguiendo una curva con desviación angular de 25 grados. Agrega un agujero axial pasante de 8 mm.
+
+### C15 — Disipador térmico radial paramétrico
+
+Diseña un disipador térmico mecánico de 90 mm de diámetro exterior, con disco base de 6 mm de espesor, cubo central de 26 mm de diámetro y 20 mm de altura total desde su cara inferior. Incorpora 12 aletas radiales de 2 mm de espesor y 18 mm de altura sobre la base, distribuidas cada 30 grados, desde un radio de 14 mm hasta 42 mm. Las aletas deben conectarse al cubo y a la base sin autointersecciones, dejando espacios libres entre ellas.
+
+## 4. Protocolo de ejecución recomendado
+
+1. Conservar una copia inmutable del texto exacto de cada prompt y de la instrucción de sistema, con sus versiones.
+2. Ejecutar cada caso en modo **open-loop** (un único intento) y **closed-loop** (hasta cinco generaciones totales, inicial más cuatro correcciones), manteniendo configuraciones comparables.
+3. Registrar por intento el modelo/proveedor, código Python, salida del sandbox, errores, tiempo, consumo y artefactos CAD.
+4. Distinguir **éxito de ejecución**, **validez B-Rep**, **exportación correcta** y **topología STL apta**. No considerar que compilar implica cumplir las dimensiones.
+5. Para la evaluación de exactitud digital, utilizar referencias CAD independientes cuando estén disponibles; no inferir IoU a partir de la propia salida generada.
+6. Seleccionar después un subconjunto representativo de piezas para impresión y metrología, sin reemplazar mediciones reales por datos sintéticos.
+
+### Estructura mínima sugerida del registro
+
+| ID | Nivel | Modelo de IA | Modo | Intento exitoso | Compila | B-Rep válido | STL watertight | Tiempo | Observaciones |
+|---|---|---|---|---|---|---|---|---|---|---|
+| B01 | Básico | — | Open-loop | — | — | — | — | — | — |
+| B01 | Básico | — | Closed-loop | — | — | — | — | — | — |
+
+> **Precaución:** algunos prompts describen diseños exigentes o contienen aspectos que requerirán interpretación o validación geométrica específica (como perfiles evolventes, lengüetas de encaje o detalles de ejes). No se debe considerar que una respuesta visualmente plausible demuestra cumplimiento dimensional o funcionamiento mecánico. Si se precisa revisar un enunciado, hacerlo como una nueva versión trazable, no cambiarlo silenciosamente durante la campaña.

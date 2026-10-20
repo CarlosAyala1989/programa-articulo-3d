@@ -1,0 +1,18 @@
+dist/
+__pycache__/
+programa/interfaz/node_modules/
+programa/interfaz/dist/
+*.env
+*.log
+.playwright-cli/
+
+# Paquetes temporales; las entregas publicadas viven en entregas/<versión>/.
+/dist-nativo/
+/output/
+/tmp/
+**/node_modules
+/programa/modelos_instalados.json
+*.sqlite
+*.sqlite-*
+*.db
+*.gguf

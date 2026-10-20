@@ -1,0 +1,6 @@
+{
+  "version": "ciel-libre-v1",
+  "commit_base": "5b015dba580c181a668dfe08e95dec2227acfc86",
+  "prompts_sha256": "ebc2b67b7e5a115a32cf0d7bc5591be20d6fb48e83f2c0e4adb16b9fa52763d3",
+  "codigo_sha256": "529c42bab82be5474312a7b7d4aef194c65e4464fe4d4ad3c5838e159d4720fe"
+}
