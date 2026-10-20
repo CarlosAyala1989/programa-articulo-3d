@@ -417,3 +417,13 @@ Rutas principales:
 /api/ejecuciones/{id}/intentos.csv
 /api/ejecuciones/{id}/entregables.zip
 ```
+
+## Campañas simultáneas
+
+El trabajador usa `CIEL_CONCURRENCIA=2` por defecto. Se pueden ejecutar dos campañas a la vez; dentro de cada campaña se conserva el orden de su matriz y los máximos de uno/cinco intentos. Puedes configurar otra concurrencia positiva en el archivo de entorno externo. El aumento consume más memoria y puede solapar contenedores CAD.
+
+El puente tiene un turno independiente para `codex-cli` y otro para `antigravity-cli`: una llamada de GPT y otra de Antigravity pueden avanzar simultáneamente. Dos solicitudes al mismo proveedor esperan su turno. Solo se vuelve a enviar una petición si el puente devuelve expresamente `409` con código `busy`, que garantiza que la llamada al modelo no empezó. Un timeout, error de conexión o error del proveedor no se reenvía automáticamente: su consumo podría ser incierto. La espera no agrega intentos experimentales.
+
+Los cambios del trabajador se incorporan a su imagen al construirla. La concurrencia se aplica al recrear el trabajador; los cambios del puente se cargan al reiniciar su servicio. Haz esas operaciones cuando no haya trabajo activo. **No ejecutes `aplicacion.iniciar_trabajador` para añadir capacidad mientras otro trabajador está generando:** su recuperación de arranque marca ejecuciones interrumpidas y pausa campañas. Tampoco reinicies el puente durante una llamada.
+
+Para habilitar una segunda campaña con un despliegue anterior todavía ocupado, se puede añadir un proceso auxiliar con el mismo entorno y los mismos volúmenes, pero otro socket de puente. Antes de mover la campaña se comprueba que todas sus ejecuciones estén pendientes y que solo exista una tarea reservada; se retira únicamente esa reserva con `revoke(..., terminate=False)`, confirmando la respuesta del trabajador, y se ejecuta la campaña en el auxiliar sin pasar por la recuperación global de arranque. Nunca se revoca ni termina la tarea activa. El auxiliar se elimina al finalizar su campaña. Esta transición se utilizó para activar GPT 5.6 Luna Max mientras Gemini 3.8 Flash High seguía ejecutándose; el trabajador y el puente originales no se reiniciaron.

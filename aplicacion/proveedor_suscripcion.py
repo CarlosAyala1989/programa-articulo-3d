@@ -76,8 +76,14 @@ def solicitar_cli(modelo: str, mensajes: list[dict], imagenes_png: list[bytes] |
     try:
         with httpx.Client(transport=httpx.HTTPTransport(uds=socket),
                           timeout=tiempo_espera_cli() + 30) as cliente:
-            respuesta = cliente.post("http://localhost/generar", json=cuerpo)
-            datos = respuesta.json()
+            while True:
+                respuesta = cliente.post("http://localhost/generar", json=cuerpo)
+                datos = respuesta.json()
+                # Solo este rechazo confirma que NO se ejecutó la llamada al modelo.
+                # Esperar no consume intentos del protocolo ni repite respuestas inciertas.
+                if respuesta.status_code != 409 or not isinstance(datos, dict) or datos.get("codigo") != "busy":
+                    break
+                time.sleep(1)
     except httpx.TimeoutException:
         raise ErrorCLI("Timeout del puente CLI; no se reenvía la llamada", "timeout") from None
     except (httpx.HTTPError, ValueError):

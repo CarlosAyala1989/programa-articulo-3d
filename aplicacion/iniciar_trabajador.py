@@ -28,7 +28,20 @@ def preparar_reinicio() -> None:
         sesion.commit()
 
 
+def argumentos_trabajador() -> list[str]:
+    """Dos campañas pueden avanzar en paralelo; cada campaña conserva su orden."""
+    valor = os.environ.get("CIEL_CONCURRENCIA", "2")
+    try:
+        concurrencia = int(valor)
+    except ValueError:
+        raise ValueError("CIEL_CONCURRENCIA debe ser un entero positivo") from None
+    if concurrencia < 1:
+        raise ValueError("CIEL_CONCURRENCIA debe ser un entero positivo")
+    return ["celery", "-A", "aplicacion.tareas:celeria", "worker",
+            "--loglevel=INFO", f"--concurrency={concurrencia}"]
+
+
 if __name__ == "__main__":
+    argumentos = argumentos_trabajador()
     preparar_reinicio()
-    os.execvp("celery", ["celery", "-A", "aplicacion.tareas:celeria", "worker",
-                         "--loglevel=INFO", "--concurrency=1"])
+    os.execvp("celery", argumentos)

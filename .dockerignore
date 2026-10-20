@@ -10,3 +10,5 @@ agente_ciel_workspace_driver.html
 **/dist
 .env
 *.env
+
+edicion-libre/

@@ -74,6 +74,7 @@ services:
       dockerfile: aplicacion/Dockerfile
     command: ["python", "-m", "aplicacion.iniciar_trabajador"]
     environment:
+      CIEL_CONCURRENCIA: ${CIEL_CONCURRENCIA:-2}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       OLLAMA_L01: ${OLLAMA_L01:-}
       OLLAMA_L02: ${OLLAMA_L02:-}

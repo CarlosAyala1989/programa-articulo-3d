@@ -73,8 +73,9 @@ class ManejadorCLI(BaseHTTPRequestHandler):
         except (ValueError, KeyError, TypeError):
             self.responder(422, {"error": "Solicitud CLI inválida"})
             return
-        if not self.server.turno.acquire(blocking=False):
-            self.responder(409, {"error": "Puente CLI ocupado; la solicitud no se ejecutó", "codigo": "busy"})
+        turno = self.server.turnos[proveedor]
+        if not turno.acquire(blocking=False):
+            self.responder(409, {"error": "Proveedor CLI ocupado; la solicitud no se ejecutó", "codigo": "busy"})
             return
         try:
             respuesta = (ejecutar_cli(modelo, mensajes, imagenes, esfuerzo_razonamiento=esfuerzo)
@@ -85,7 +86,7 @@ class ManejadorCLI(BaseHTTPRequestHandler):
         except Exception:
             self.responder(503, {"error": "El puente CLI no pudo completar la solicitud"})
         finally:
-            self.server.turno.release()
+            turno.release()
 
 
 def _interrumpir(*_) -> None:
@@ -130,7 +131,7 @@ def iniciar_puente(ruta: str) -> None:
         _retirar_socket_obsoleto(socket)
         with socketserver.ThreadingUnixStreamServer(str(socket), ManejadorCLI) as servidor:
             os.chmod(socket, 0o600)
-            servidor.turno = threading.Lock()
+            servidor.turnos = {proveedor: threading.Lock() for proveedor in MODELOS_SUSCRIPCION}
             servidor.timeout = 5
             try:
                 servidor.serve_forever()

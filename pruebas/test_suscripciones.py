@@ -309,7 +309,7 @@ class SuscripcionesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directorio:
             ruta = str(Path(directorio) / "cli.sock")
             with socketserver.ThreadingUnixStreamServer(ruta, ManejadorCLI) as servidor:
-                servidor.turno = threading.Lock()
+                servidor.turnos = {p: threading.Lock() for p in ("codex-cli", "antigravity-cli")}
                 hilo = threading.Thread(target=servidor.serve_forever, daemon=True)
                 hilo.start()
                 try:
@@ -325,13 +325,13 @@ class SuscripcionesTests(unittest.TestCase):
                         self.assertEqual(solicitar_cli(elegido, MENSAJES, esfuerzo_razonamiento="high"), {"texto": "Python"})
                         cli.assert_called_once_with(elegido, MENSAJES, [], esfuerzo_razonamiento="high")
                     with httpx.Client(transport=httpx.HTTPTransport(uds=ruta)) as cliente:
-                        servidor.turno.acquire()
+                        servidor.turnos["codex-cli"].acquire()
                         try:
                             respuesta = cliente.post("http://localhost/generar", json={
                                 "modelo": "codex-cli", "mensajes": MENSAJES})
                             self.assertEqual(respuesta.status_code, 409)
                         finally:
-                            servidor.turno.release()
+                            servidor.turnos["codex-cli"].release()
                         self.assertEqual(cliente.get("http://localhost/salud").status_code, 200)
                 finally:
                     servidor.shutdown()
