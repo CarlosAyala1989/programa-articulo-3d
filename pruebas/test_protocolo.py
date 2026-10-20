@@ -50,6 +50,7 @@ class ProtocoloDigital(unittest.TestCase):
         self.assertEqual(datos["primer_exito_cad_exportable"], [0, 0, 1, 0, 0])
         self.assertEqual(datos["compile_rate_acumulado_pct"][-1], 50.0)
         self.assertEqual(datos["ir_cad_pct"], 50.0)
+        self.assertEqual(datos["ir_codigo_pct"], 50.0)
         self.assertEqual(datos["topologia"]["cobertura_stl_pct"], 50.0)
         self.assertFalse(datos["final"])
 

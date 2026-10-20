@@ -5,6 +5,7 @@ import hashlib
 import io
 import json
 import os
+import tempfile
 from pathlib import Path
 from typing import Literal
 from uuid import uuid4
@@ -16,10 +17,11 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
+from starlette.background import BackgroundTask
 
 from aplicacion.base_datos import (
     ArchivoGenerado, Campana, CasoDiseno, ComparacionDigital, Ejecucion,
-    InformeCalidad, InformeTopologia, VersionConjunto, crear_sesion, crear_tablas,
+    InformeCalidad, InformeTopologia, IntentoGeneracion, VersionConjunto, crear_sesion, crear_tablas,
 )
 from aplicacion.campanas import cambiar_estado, crear_campana, previsualizar, resumen_campana, resolver_esfuerzos_campana, validar_matriz
 from aplicacion.configuracion import (
@@ -41,6 +43,7 @@ from aplicacion.proveedor_suscripcion import catalogos_cli, estado_puente, model
 from aplicacion.cli_suscripcion import proveedor_cli
 from aplicacion.limites_modelos import limites_modelo
 from aplicacion.calidad.suscripcion import validar_revisores
+from aplicacion.resultados import csv_registros, csv_tabla_digital, figura_compilacion, metadatos_exportacion, paquete_resultados
 from aplicacion.tareas import tarea_analisis, tarea_campana, tarea_generacion
 
 
@@ -441,6 +444,44 @@ def consultar_ejecucion(identificador: str) -> dict:
         return serializar_ejecucion(ejecucion, topologias, comparacion, informes_calidad)
 
 
+@aplicacion.get("/api/ejecuciones/{identificador}/datos.json")
+def descargar_datos_ejecucion(identificador: str) -> Response:
+    datos = consultar_ejecucion(identificador)
+    with crear_sesion() as sesion:
+        respuestas = {i.identificador: i.respuesta_modelo for i in sesion.scalars(
+            select(IntentoGeneracion).where(IntentoGeneracion.ejecucion_identificador == identificador))}
+    for intento in datos["intentos"]:
+        intento["respuesta_modelo"] = respuestas.get(intento["identificador"], "")
+    return Response(json.dumps({**metadatos_exportacion(datos["estado"] not in {"completada", "fallida"}),
+        "ejecuciones": [datos]}, ensure_ascii=False, default=str), media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="ejecucion-{identificador}.json"'})
+
+
+def _descargar_paquete(datos: dict, nombre: str) -> FileResponse:
+    descriptor, ruta = tempfile.mkstemp(prefix="ciel-exportacion-", suffix=".zip")
+    os.close(descriptor)
+    temporal = Path(ruta)
+    try:
+        paquete_resultados(datos, DIRECTORIO_ARTEFACTOS, temporal)
+    except Exception:
+        temporal.unlink(missing_ok=True)
+        raise
+    return FileResponse(temporal, media_type="application/zip", filename=nombre,
+        background=BackgroundTask(temporal.unlink, missing_ok=True))
+
+
+@aplicacion.get("/api/ejecuciones/{identificador}/entregables.zip")
+def descargar_entregables_ejecucion(identificador: str) -> FileResponse:
+    return _descargar_paquete(json.loads(descargar_datos_ejecucion(identificador).body), f"ejecucion-{identificador}.zip")
+
+
+@aplicacion.get("/api/ejecuciones/{identificador}/intentos.csv")
+def descargar_intentos_ejecucion(identificador: str) -> Response:
+    datos = json.loads(descargar_datos_ejecucion(identificador).body)
+    return Response(csv_registros(datos, "intentos"), media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="intentos-{identificador}.csv"'})
+
+
 @aplicacion.post("/api/ejecuciones/{identificador}/reanalizar", status_code=202)
 def reanalizar_ejecucion(identificador: str) -> dict:
     with crear_sesion() as sesion:
@@ -625,7 +666,7 @@ def descargar_metricas(identificador: str) -> Response:
                 "n_pendiente", "n_bloqueado", "n_cancelado", "final",
                 "primer_exito_ejecucion", "primer_exito_cad_exportable",
                 "compile_rate_acumulado_pct", "exito_cad_acumulado_pct",
-                "ir_cad_pct", "sin_exito_ejecucion", "sin_cad_exportable",
+                "ir_codigo_pct", "ir_cad_pct", "sin_exito_ejecucion", "sin_cad_exportable",
                 "intentos_observados", "tokens_entrada", "tokens_salida",
                 "costo_estimado_usd", "latencia_ia_media_s", "latencia_cad_media_s",
                 "tiempo_total_mediana_s", "topologia", "topologia_comun", "referencias"]
@@ -643,6 +684,8 @@ def descargar_metricas(identificador: str) -> Response:
 def descargar_datos(identificador: str) -> Response:
     campana = consultar_campana(identificador)
     metricas = consultar_metricas(identificador)
+    conjunto = consultar_conjunto(campana["conjunto_identificador"])
+    casos = {caso["identificador"]: caso for caso in conjunto["casos"]}
     with crear_sesion() as sesion:
         ejecuciones = list(sesion.scalars(select(Ejecucion).where(
             Ejecucion.campana_identificador == identificador
@@ -662,6 +705,12 @@ def descargar_datos(identificador: str) -> Response:
                 comparaciones[comparacion.ejecucion_identificador] = comparacion
         datos = [{
             "identificador": e.identificador, "caso_identificador": e.caso_identificador,
+            "caso": casos.get(e.caso_identificador, {}).get("codigo"),
+            "nivel": casos.get(e.caso_identificador, {}).get("nivel"),
+            "descripcion": e.descripcion, "mensaje": e.mensaje, "numero_intentos": e.numero_intentos,
+            "fecha_creacion": e.fecha_creacion, "fecha_inicio": e.fecha_inicio, "fecha_fin": e.fecha_fin,
+            "technical_success": (e.configuracion_calidad or {}).get("technical_success") if e.modo == "quality-loop" else bool(e.primer_exito_exportacion),
+            "quality_success": (e.configuracion_calidad or {}).get("quality_success") if e.modo == "quality-loop" else None,
             "condicion_identificador": e.condicion_identificador,
             "orden": e.orden_campana, "repeticion": e.repeticion,
             "modelo": e.modelo, "motor": e.motor, "modo": e.modo,
@@ -704,10 +753,38 @@ def descargar_datos(identificador: str) -> Response:
                           "runtime_identificador": i.runtime_identificador}
                          for i in e.intentos],
         } for e in ejecuciones]
-    return Response(json.dumps({"campana": campana, "metricas": metricas,
+    return Response(json.dumps({**metadatos_exportacion(not metricas["final"]),
+                                "campana": campana, "metricas": metricas, "conjunto": conjunto,
                                 "ejecuciones": datos}, ensure_ascii=False, default=str),
                     media_type="application/json",
                     headers={"Content-Disposition": f'attachment; filename="datos-{identificador}.json"'})
+
+
+@aplicacion.get("/api/campanas/{identificador}/tabla-digital.csv")
+def descargar_tabla_digital(identificador: str) -> Response:
+    return Response(csv_tabla_digital(consultar_metricas(identificador)), media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="tabla-digital-{identificador}.csv"'})
+
+
+@aplicacion.get("/api/campanas/{identificador}/figura.{formato}")
+def descargar_figura(identificador: str, formato: Literal["svg", "png", "pdf"],
+                    nivel: Literal["todos", "basico", "intermedio", "complejo"] = "todos",
+                    tipo: Literal["codigo", "cad"] = "codigo") -> Response:
+    datos = figura_compilacion(consultar_metricas(identificador), formato, nivel, tipo)
+    return Response(datos, media_type={"svg": "image/svg+xml", "png": "image/png", "pdf": "application/pdf"}[formato],
+        headers={"Content-Disposition": f'attachment; filename="figura-{tipo}-{nivel}-{identificador}.{formato}"'})
+
+
+@aplicacion.get("/api/campanas/{identificador}/entregables.zip")
+def descargar_entregables(identificador: str) -> FileResponse:
+    return _descargar_paquete(json.loads(descargar_datos(identificador).body), f"resultados-{identificador}.zip")
+
+
+@aplicacion.get("/api/campanas/{identificador}/registros/{tipo}.csv")
+def descargar_registros_campana(identificador: str, tipo: Literal["ejecuciones", "intentos", "geometria"]) -> Response:
+    datos = json.loads(descargar_datos(identificador).body)
+    return Response(csv_registros(datos, tipo), media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{tipo}-{identificador}.csv"'})
 
 
 @aplicacion.get("/")

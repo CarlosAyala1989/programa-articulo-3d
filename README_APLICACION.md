@@ -371,3 +371,49 @@ El cambio de plantilla y de imágenes CAD exige crear campañas nuevas; las camp
 conservan sus perfiles y resultados y se bloquean si se intenta ejecutarlas bajo otro protocolo.
 El Quality Loop oculto conserva sus presupuestos históricos. Los límites de aislamiento CAD
 (memoria, tiempo, archivos geométricos y procesos) son independientes de los tokens y se conservan.
+
+## Exportaciones durante la generación
+
+El seguimiento de campañas muestra **Ver ejecución** y **Exportar ejecución ZIP** para
+la generación activa; si aún está en cola muestra la próxima ejecución pendiente.
+Las descargas están disponibles desde que existe el trabajo, aunque todavía no haya CAD.
+Se identifican como provisionales hasta que termina la cohorte evaluable. Una descarga
+contiene lo disponible en ese momento: para obtener resultados posteriores hay que descargarla de nuevo.
+
+En Campañas y Métricas se pueden descargar:
+
+- Figuras de Compile Rate o éxito CAD exportable en **PNG, SVG y PDF**, para todos los
+  prompts o una dificultad. Conservan los denominadores y la separación entre ejecución
+  de código, CAD válido y aceptación de calidad; la ausencia de evaluables no se convierte en cero.
+- Métricas CSV, tabla Digital Metrics CSV, datos y trazas JSON, y registros separados
+  de ejecuciones, intentos y geometría CSV.
+- Un ZIP con prompts, CSV, figuras de ambos criterios y de las dificultades presentes,
+  código y respuesta de cada intento, solicitudes y archivos CAD registrados.
+
+La tabla Digital Metrics y el ZIP incluyen las referencias versionadas de literatura del
+desktop (`literatura_digital_v1.json`). Se conservan sus fuentes y advertencias: son contexto,
+con otros datasets y criterios, y no se usan para construir rankings ni alterar las tasas de la campaña.
+
+Cada resultado individual ofrece también su ZIP, JSON completo y CSV de intentos,
+antes y después de finalizar. El ZIP conserva STL, STEP, Python, FCStd y cualquier otra
+salida ya registrada, sin fabricar archivos CAD para trabajos aún pendientes.
+Incluye un manifiesto SHA-256 y una lista de archivos ausentes o alterados. Se construye
+como archivo temporal en el servidor y se elimina después de la descarga. No incluye
+credenciales ni una copia completa de PostgreSQL. El formato se versiona como
+`ciel-exportaciones-v1`; no modifica campañas, prompts ni protocolos de generación históricos.
+
+Rutas principales:
+
+```text
+/api/campanas/{id}/figura.png?tipo=codigo&nivel=todos
+/api/campanas/{id}/figura.svg?tipo=cad&nivel=basico
+/api/campanas/{id}/figura.pdf?tipo=codigo&nivel=complejo
+/api/campanas/{id}/tabla-digital.csv
+/api/campanas/{id}/registros/ejecuciones.csv
+/api/campanas/{id}/registros/intentos.csv
+/api/campanas/{id}/registros/geometria.csv
+/api/campanas/{id}/entregables.zip
+/api/ejecuciones/{id}/datos.json
+/api/ejecuciones/{id}/intentos.csv
+/api/ejecuciones/{id}/entregables.zip
+```

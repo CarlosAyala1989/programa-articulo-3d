@@ -9,6 +9,9 @@
 .enlaces { display: flex; gap: 18px; flex-wrap: wrap; margin: 16px 0; }
 .enlaces a { color: var(--azul); text-decoration: none; font-size: 12px; line-height: 1.5; }
 .enlaces a:hover { text-decoration: underline; text-underline-offset: 3px; }
+.exportaciones .campos > div { min-width: 0; }
+.seguimiento-ejecucion { overflow-wrap: anywhere; }
+.seguimiento-ejecucion a { display: inline-block; margin: 6px 10px 0 0; }
 .lista-casos { display: grid; gap: 8px; margin-top: 22px; }
 .lista-casos details { border: 1px solid var(--borde); border-radius: 8px; overflow: hidden; }
 .lista-casos summary { cursor: pointer; padding: 14px 16px; font-size: 11px; font-weight: 600; letter-spacing: .3px; color: var(--texto); background: var(--superficie-suave); }

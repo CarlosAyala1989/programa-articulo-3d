@@ -6,3 +6,4 @@ SQLAlchemy==2.0.43
 psycopg[binary]==3.2.9
 httpx==0.28.1
 pydantic==2.11.7
+matplotlib==3.10.8

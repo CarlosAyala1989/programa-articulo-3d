@@ -1,0 +1,39 @@
+{
+  "version": "ciel-literatura-digital-v1",
+  "filas": [
+    {
+      "metodo": "Text2CAD (evaluado por CAD-Coder)",
+      "ir_reportado_pct": 3.75,
+      "compile_rate_reportado_pct": null,
+      "nivel": "sin desglose equivalente",
+      "dataset": "Text2CAD test split",
+      "fuente": {
+        "titulo": "CAD-Coder: Text-to-CAD Generation with Chain-of-Thought and Geometric Reward",
+        "url": "https://papers.neurips.cc/paper_files/paper/2025/file/564a224e88f2490f3c1deaae877d37e3-Paper-Conference.pdf",
+        "pagina": 8,
+        "tabla": 1,
+        "sha256_pdf": "df4bd3bcd45f9b56c80c6f35c647c7fb1db173ef6f9343c9758a82846ae97971",
+        "fecha_consulta": "2026-10-13"
+      },
+      "comparacion_directa": false,
+      "nota": "IR incluye fallos de ejecución o geometría inválida. La tabla no publica Compile Rate ni categorías equivalentes a este lote; no se deriva Compile Rate de IR."
+    },
+    {
+      "metodo": "CAD-Coder",
+      "ir_reportado_pct": 1.45,
+      "compile_rate_reportado_pct": null,
+      "nivel": "sin desglose equivalente",
+      "dataset": "Text2CAD test split",
+      "fuente": {
+        "titulo": "CAD-Coder: Text-to-CAD Generation with Chain-of-Thought and Geometric Reward",
+        "url": "https://papers.neurips.cc/paper_files/paper/2025/file/564a224e88f2490f3c1deaae877d37e3-Paper-Conference.pdf",
+        "pagina": 8,
+        "tabla": 1,
+        "sha256_pdf": "df4bd3bcd45f9b56c80c6f35c647c7fb1db173ef6f9343c9758a82846ae97971",
+        "fecha_consulta": "2026-10-13"
+      },
+      "comparacion_directa": false,
+      "nota": "IR incluye fallos de ejecución o geometría inválida. La tabla no publica Compile Rate ni categorías equivalentes a este lote; no se deriva Compile Rate de IR."
+    }
+  ]
+}

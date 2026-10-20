@@ -6,7 +6,7 @@ from uuid import uuid4
 
 import httpx
 
-from sqlalchemy import select
+from sqlalchemy import case, select
 
 from aplicacion.base_datos import (
     Campana, CasoDiseno, CondicionExperimental, Ejecucion, VersionConjunto,
@@ -181,6 +181,20 @@ def resumen_campana(campana: Campana) -> dict:
         estados = Counter(sesion.scalars(
             select(Ejecucion.estado).where(Ejecucion.campana_identificador == campana.identificador)
         ))
+        estados_visibles = ["generando"]
+        if campana.estado == "bloqueada":
+            estados_visibles.append("bloqueada")
+        elif campana.estado == "en_curso":
+            estados_visibles.append("pendiente")
+        actual = sesion.scalar(select(Ejecucion).where(
+            Ejecucion.campana_identificador == campana.identificador,
+            Ejecucion.estado.in_(estados_visibles),
+        ).order_by(case((Ejecucion.estado == "generando", 0), else_=1), Ejecucion.orden_campana).limit(1))
+        caso = sesion.get(CasoDiseno, actual.caso_identificador) if actual and actual.caso_identificador else None
+        ejecucion_actual = {"identificador": actual.identificador, "orden": actual.orden_campana,
+            "caso": caso.codigo if caso else None, "modelo": actual.modelo, "motor": actual.motor,
+            "modo": actual.modo, "estado": actual.estado, "intento": actual.numero_intentos,
+            "mensaje": actual.mensaje} if actual else None
     return {
         "identificador": campana.identificador, "nombre": campana.nombre,
         "tipo": campana.tipo, "estado": campana.estado, "mensaje": campana.mensaje,
@@ -191,6 +205,7 @@ def resumen_campana(campana: Campana) -> dict:
         "presupuesto_usd": campana.presupuesto_usd,
         "gasto_estimado_usd": campana.gasto_estimado_usd,
         "estados_ejecucion": dict(estados),
+        "ejecucion_actual": ejecucion_actual,
         "fecha_creacion": campana.fecha_creacion,
         "fecha_inicio": campana.fecha_inicio, "fecha_fin": campana.fecha_fin,
     }

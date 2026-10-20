@@ -75,6 +75,7 @@ def resumen_grupo(
         "sin_exito_ejecucion": n - sum(primeros_ejecucion),
         "sin_cad_exportable": n - sum(primeros_cad),
         "ir_cad_pct": porcentaje(n - sum(primeros_cad), n),
+        "ir_codigo_pct": porcentaje(n - sum(primeros_ejecucion), n),
         "intentos_observados": len(intentos),
         "tokens_entrada": sum(i.tokens_entrada or 0 for i in intentos),
         "tokens_salida": sum(i.tokens_salida or 0 for i in intentos),

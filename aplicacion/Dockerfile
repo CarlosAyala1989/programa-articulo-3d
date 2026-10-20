@@ -13,5 +13,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY aplicacion /servicio/aplicacion
 COPY datos/prompts_60_v1.json /servicio/datos/prompts_60_v1.json
 COPY datos/prompts_45_v1.json /servicio/datos/prompts_45_v1.json
+COPY datos/literatura_digital_v1.json /servicio/datos/literatura_digital_v1.json
 COPY --from=interfaz /interfaz/dist /servicio/aplicacion/estaticos
 ENV PYTHONPATH=/servicio PYTHONDONTWRITEBYTECODE=1
