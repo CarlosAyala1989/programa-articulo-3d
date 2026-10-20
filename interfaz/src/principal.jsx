@@ -5,7 +5,7 @@ import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import { TrackballControls } from 'three/addons/controls/TrackballControls.js';
 import { toCreasedNormals } from 'three/addons/utils/BufferGeometryUtils.js';
 import PanelInvestigacion from './campanas.jsx';
-import CampoEsfuerzo, { nombresEsfuerzo, nivelesEsfuerzo } from './esfuerzo.jsx';
+import CampoEsfuerzo, { nombresEsfuerzo, nivelesEsfuerzo, valorEsfuerzo } from './esfuerzo.jsx';
 import './estilos.css';
 
 const nombresMotor = {
@@ -17,6 +17,7 @@ const nombresModelo = {
   'deepseek-flash': 'DeepSeek Flash',
   'deepseek-v4-pro': 'DeepSeek Pro',
 };
+const mostrarQualityLoop = false;
 
 function OpcionesModelos({ modelos }) {
   const grupos = [
@@ -81,7 +82,7 @@ function InformeCalidad({ informe, ejecucionId }) {
 const paginas = {
   generar: ['Generar pieza', 'Describe la geometría y elige cómo construirla.'],
   resultado: ['Resultado 3D', 'Revisa el modelo, los intentos y los archivos de tu ejecución.'],
-  casos: ['60 casos', 'Explora los prompts por dificultad y sus referencias digitales.'],
+  casos: ['Prompts CAD', 'Explora los conjuntos de 45 y 60 prompts por dificultad.'],
   campanas: ['Campañas', 'Configura y controla las comparaciones entre modelos y motores CAD.'],
   metricas: ['Métricas', 'Consulta los resultados de una campaña y exporta sus datos.'],
 };
@@ -245,7 +246,27 @@ function Aplicacion() {
   }, [tema]);
 
   useEffect(() => {
-    fetch('/api/opciones').then((respuesta) => respuesta.json()).then(cambiarOpciones).catch(() => {});
+    let activo = true;
+    let consultando = false;
+    async function actualizarOpciones() {
+      if (consultando) return;
+      consultando = true;
+      try {
+        const respuesta = await fetch('/api/opciones');
+        if (!respuesta.ok) return;
+        const datos = await respuesta.json();
+        if (activo) cambiarOpciones(datos);
+      } catch { /* Conservar las últimas opciones ante un corte temporal. */ }
+      finally { consultando = false; }
+    }
+    actualizarOpciones();
+    const temporizador = setInterval(actualizarOpciones, 30000);
+    window.addEventListener('focus', actualizarOpciones);
+    return () => {
+      activo = false;
+      clearInterval(temporizador);
+      window.removeEventListener('focus', actualizarOpciones);
+    };
   }, []);
 
   useEffect(() => { document.title = `${paginas[ruta.pagina][0]} · Agente Ciel`; }, [ruta.pagina]);
@@ -297,7 +318,7 @@ function Aplicacion() {
         body: JSON.stringify({ descripcion, caso_identificador: casoSeleccionado?.identificador || null, motor, modelo, modo,
           best_of_n: modo === 'quality-loop' && bestOfN,
           proveedor_revisores: modo === 'quality-loop' ? proveedorRevisores : 'nvidia',
-          esfuerzo_razonamiento: nivelesEsfuerzo(opciones, modelo) ? esfuerzo : null }),
+          esfuerzo_razonamiento: valorEsfuerzo(opciones, modelo, esfuerzo) }),
       });
       const datos = await respuesta.json();
       if (!respuesta.ok) throw new Error(typeof datos.detail === 'string' ? datos.detail : 'No se pudo iniciar la generación.');
@@ -339,8 +360,8 @@ function Aplicacion() {
           {casoSeleccionado && <p className="nota-campana">Caso {casoSeleccionado.codigo} · {casoSeleccionado.nivel}. <button type="button" className="enlace-boton" onClick={() => cambiarCasoSeleccionado(null)}>Quitar asociación</button></p>}
           <textarea id="descripcion" value={descripcion} onChange={(evento) => { cambiarDescripcion(evento.target.value); cambiarCasoSeleccionado(null); }} minLength={12} maxLength={4000} rows={7} placeholder="Dimensiones en milímetros, agujeros, radios, posiciones y otras restricciones…" required />
           <div className="contador">{descripcion.length} / 4000 caracteres</div>
-          <div className="campos"><div><label htmlFor="modelo">MODELO DE IA</label><select id="modelo" value={modelo} onChange={(evento) => cambiarModelo(evento.target.value)} required><option value="">Selecciona un modelo</option><OpcionesModelos modelos={opciones?.modelos || nombresModelo} /></select></div><CampoEsfuerzo identificador="esfuerzo" modelo={modelo} opciones={opciones} valor={esfuerzo} alCambiar={cambiarEsfuerzo} /></div>
-          <div className="campos"><div><label htmlFor="motor">MOTOR CAD</label><select id="motor" value={motor} onChange={(evento) => cambiarMotor(evento.target.value)}>{Object.entries(opciones?.motores || nombresMotor).map(([clave, nombre]) => <option value={clave} key={clave}>{nombre}</option>)}</select></div><div><label htmlFor="modo">ESTRATEGIA</label><select id="modo" value={modo} onChange={(evento) => cambiarModo(evento.target.value)}><option value="open-loop">Open-loop · una generación</option><option value="closed-loop">Closed-loop · hasta cinco</option><option value="quality-loop" disabled={!opciones?.quality_loop?.disponible}>Quality Loop · métricas y revisión{!opciones?.quality_loop?.disponible ? ' (revisores no configurados)' : ''}</option></select></div></div>
+          <div className="campos"><div><label htmlFor="modelo">MODELO DE IA</label><select id="modelo" value={modelo} onChange={(evento) => { cambiarModelo(evento.target.value); cambiarEsfuerzo(valorEsfuerzo(opciones, evento.target.value)); }} required><option value="">Selecciona un modelo</option><OpcionesModelos modelos={opciones?.modelos || nombresModelo} /></select></div><CampoEsfuerzo identificador="esfuerzo" modelo={modelo} opciones={opciones} valor={esfuerzo} alCambiar={(nivel) => { const destino = opciones?.detalles_esfuerzo?.[modelo]?.modelos_por_esfuerzo?.[nivel]; if (destino) cambiarModelo(destino); cambiarEsfuerzo(nivel); }} /></div>
+          <div className="campos"><div><label htmlFor="motor">MOTOR CAD</label><select id="motor" value={motor} onChange={(evento) => cambiarMotor(evento.target.value)}>{Object.entries(opciones?.motores || nombresMotor).map(([clave, nombre]) => <option value={clave} key={clave}>{nombre}</option>)}</select></div><div><label htmlFor="modo">ESTRATEGIA</label><select id="modo" value={modo} onChange={(evento) => cambiarModo(evento.target.value)}><option value="open-loop">Open-loop · una generación</option><option value="closed-loop">Closed-loop · hasta cinco</option>{mostrarQualityLoop && <option value="quality-loop" disabled={!opciones?.quality_loop?.disponible}>Quality Loop · métricas y revisión{!opciones?.quality_loop?.disponible ? ' (revisores no configurados)' : ''}</option>}</select></div></div>
           {modo === 'quality-loop' && <div><label htmlFor="proveedor-revisores">PLANIFICADOR Y REVISORES</label><select id="proveedor-revisores" value={proveedorRevisores} onChange={(evento) => cambiarProveedorRevisores(evento.target.value)} required><option value="" disabled>Selecciona los revisores</option><OpcionesModelos modelos={opciones?.quality_loop?.proveedores_revisores} /></select></div>}
           {opciones?.suscripciones?.configurados?.[modelo] && <p className="nota">Usa la sesión de tu cuenta en segundo plano. Cada generación, reparación y candidato consume la cuota de tu suscripción.</p>}
           {modo === 'quality-loop' && <label className="opcion-best"><input type="checkbox" checked={bestOfN} onChange={(evento) => cambiarBestOfN(evento.target.checked)} /><span><strong>Best-of-N</strong><small>Generar y comparar hasta 3 candidatos por ciclo. Aumenta el uso de modelos; no es comparable directamente con los modos históricos.</small></span></label>}
@@ -349,7 +370,7 @@ function Aplicacion() {
           <button className="boton" disabled={enviando || !modelo || descripcion.trim().length < 12}>{enviando ? 'Iniciando…' : 'Generar pieza 3D'} <span>↗</span></button>
         </form>
       </section>
-      <aside className="guia-generacion"><h2>Tu pieza, paso a paso</h2><ol><li>Describe las dimensiones, curvas y detalles que necesitas.</li><li>Elige un modelo de IA. El nivel de esfuerzo solo se aplica a DeepSeek Flash y Pro.</li><li>Selecciona el motor CAD y la estrategia de generación.</li></ol><p>El resultado se abrirá en su propia página con el visor 360°, los archivos y el diagnóstico de cada intento.</p><a href="#/casos">Explorar los 60 casos de evaluación →</a>{identificador && <a href={`#/resultado/${identificador}`}>Ver la última ejecución →</a>}</aside>
+      <aside className="guia-generacion"><h2>Tu pieza, paso a paso</h2><ol><li>Describe las dimensiones, curvas y detalles que necesitas.</li><li>Elige un modelo de IA y uno de sus niveles de esfuerzo disponibles.</li><li>Selecciona el motor CAD y la estrategia de generación.</li></ol><p>El resultado se abrirá en su propia página con el visor 360°, los archivos y el diagnóstico de cada intento.</p><a href="#/casos">Explorar los conjuntos de prompts →</a>{identificador && <a href={`#/resultado/${identificador}`}>Ver la última ejecución →</a>}</aside>
     </div>}
 
     {ruta.pagina === 'resultado' && <div className="pagina-resultado">

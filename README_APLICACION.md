@@ -1,6 +1,8 @@
 # Agente Ciel · generación CAD y evaluación digital
 
-Aplicación local para convertir descripciones en español en modelos CAD con **CadQuery, build123d y FreeCAD Python API**. Permite generación individual y campañas con **open-loop** (un intento), **closed-loop** (hasta cinco intentos con diagnóstico y reparación) y un **Quality Loop experimental** que planifica, genera, valida, mide y repara hasta tres ciclos. Incluye el conjunto versionado **CAD-LLMIA-60**: 20 casos básicos, 20 intermedios y 20 complejos. La aplicación calcula únicamente resultados digitales; no gestiona impresión, fotografías, escáneres ni metrología física.
+Aplicación local para convertir descripciones en español en modelos CAD con **CadQuery, build123d y FreeCAD Python API**. La interfaz permite generación individual y campañas con **open-loop** (un intento) y **closed-loop** (hasta cinco intentos con diagnóstico y reparación). El código de **Quality Loop experimental** y sus informes se conservan, con la opción oculta en el selector de estrategias.
+
+Incluye los conjuntos versionados **CAD-LLMIA-45**, compartido con la edición libre (15 casos básicos, 15 intermedios y 15 complejos), y **CAD-LLMIA-60**, histórico (20 casos por nivel). Ambos se cargan congelados al arrancar, sin duplicarse tras reiniciar. En **Prompts CAD** y **Campañas**, el selector permite elegir el conjunto; los 45 prompts aparecen inicialmente. Para campañas piloto, **Seleccionar todos los prompts** marca todos los casos del conjunto activo y **Quitar selección** los desmarca. La campaña principal conserva sus 60 casos y condiciones históricas. La aplicación calcula únicamente resultados digitales; no gestiona impresión, fotografías, escáneres ni metrología física.
 
 Cada ejecución conserva la solicitud efectiva, respuesta, script, tokens, latencia, fase de fallo, primer éxito de ejecución, primer CAD válido, primer CAD exportable y archivos con SHA-256. Una respuesta de IA se persiste antes de pasar al runtime CAD. Un proceso abortado con desenlace incierto se muestra como incidencia; nunca se reenvía automáticamente una petición cuya facturación o respuesta podría haberse perdido.
 
@@ -87,6 +89,8 @@ ese comando con `WorkingDirectory` apuntando al repositorio y un `PATH` que incl
 CLI. Debe ejecutarse en la sesión del mismo usuario autenticado. En este equipo está
 instalado como `agente-ciel-suscripciones.service`; puedes consultar su estado con
 `systemctl --user status agente-ciel-suscripciones`.
+El puente detecta y retira sockets abandonados tras un apagado para poder reiniciarse;
+si otro puente sigue escuchando, conserva su socket y rechaza el segundo arranque.
 
 Añade `CLI_PUENTE_DIRECTORIO=/ruta/absoluta/al/directorio/puente` al archivo externo de
 entorno, conserva su modo `600` y habilita el archivo Compose adicional:
@@ -108,9 +112,38 @@ no convierte todavía el proyecto en un instalador de escritorio.
 La interfaz también muestra los **modelos concretos** anunciados por cada CLI, agrupados
 por proveedor. El catálogo Codex procede de `codex app-server` mediante `model/list`;
 Antigravity usa `agy models`. Son consultas de metadatos sin turnos de inferencia, con
-caché de cinco minutos. Si la consulta falla, permanece la opción predeterminada del CLI
-y el error del catálogo se expone en `suscripciones.catalogos` de `/api/opciones`.
+caché de cinco minutos. El último catálogo correcto se guarda de forma atómica en
+`$XDG_STATE_HOME/agente-ciel/catalogos` (por defecto `~/.local/state/agente-ciel/catalogos`;
+en Windows, `%LOCALAPPDATA%/agente-ciel/catalogos`). `CLI_CATALOGO_DIRECTORIO` permite
+cambiar esta ruta. Solo se guardan metadatos de modelos, sin sesiones ni credenciales.
+Si una consulta falla después de reiniciar, se conserva ese catálogo con estado
+`guardado` y se vuelve a consultar después de diez segundos en la siguiente petición.
+Una consulta correcta reemplaza el catálogo anterior, incluidos los modelos retirados.
+Sin catálogo previo, permanece la opción predeterminada del CLI. El error se expone
+en `suscripciones.catalogos` de `/api/opciones`. La interfaz muestra el identificador
+exacto de cada modelo y refresca las opciones cada treinta segundos y al recuperar
+el foco, por lo que también recoge la recuperación del puente después del arranque.
 El catálogo anunciado no certifica acceso ni cuota de la cuenta.
+
+El campo **Nivel de esfuerzo** usa los niveles y el predeterminado anunciados por cada
+modelo concreto. Codex aporta `supportedReasoningEfforts` y `defaultReasoningEffort`;
+se envía la elección con `model_reasoning_effort`. El adaptador ofrece `low`, `medium`,
+`high`, `xhigh` y `max` cuando aparecen en ese catálogo. `ultra` requiere delegación
+automática y se excluye del transporte CAD de un turno sin subagentes.
+Antigravity se consulta mediante `agy --print /effort --model ID --output-format json`,
+aceptando únicamente metadatos de cero turnos. Si el esfuerzo define una variante de
+Gemini, cambiarlo también cambia el identificador exacto seleccionado y se envía
+`--effort` con ese mismo nivel. Los modelos que el CLI anuncia como no ajustables
+mantienen el campo deshabilitado; GPT-OSS muestra el `medium` de su identificador,
+y para Claude no se inventa un presupuesto numérico de pensamiento.
+
+En campañas se elige el esfuerzo de cada modelo por separado. La API acepta
+`esfuerzos_por_modelo` en creación y previsualización; el campo global anterior sigue
+aplicándose solo a DeepSeek. Los valores se congelan en perfiles, condiciones,
+ejecuciones y trazas de cada intento, usando `ciel-esfuerzo-por-modelo-v1` y el transporte
+`ciel-cli-subscription-v3`. Las ejecuciones históricas sin selección explícita siguen
+sin enviar una elección de esfuerzo. Las consultas de metadatos no generan CAD ni
+consumen turnos de inferencia.
 
 Una selección como `codex-cli::gpt-6.1-sol` o
 `antigravity-cli::gemini-3.1-pro-high` se guarda como identidad de la ejecución y se envía

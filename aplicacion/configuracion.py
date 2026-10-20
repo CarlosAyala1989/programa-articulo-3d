@@ -3,7 +3,7 @@
 import os
 import re
 
-from aplicacion.cli_suscripcion import proveedor_cli, perfil_cli
+from aplicacion.cli_suscripcion import proveedor_cli, perfil_cli, validar_esfuerzo_cli
 
 
 URL_BASE_DATOS = os.environ.get(
@@ -120,9 +120,11 @@ ESFUERZO_PREDETERMINADO = "max"
 
 def resolver_esfuerzo(modelo: str, esfuerzo_razonamiento: str | None = None) -> str | None:
     if proveedor_cli(modelo):
-        if esfuerzo_razonamiento is not None:
-            raise ValueError("El esfuerzo DeepSeek no corresponde a un CLI de suscripción")
-        return None
+        if esfuerzo_razonamiento is None:
+            return None
+        from aplicacion.proveedor_suscripcion import catalogos_cli
+        detalle = catalogos_cli().get(proveedor_cli(modelo), {}).get("modelos", {}).get(modelo, {})
+        return validar_esfuerzo_cli(modelo, esfuerzo_razonamiento, detalle)
     if modelo in MODELOS_LOCALES:
         if esfuerzo_razonamiento is not None:
             raise ValueError("El nivel de esfuerzo solo está disponible para DeepSeek Flash y Pro")
@@ -147,7 +149,7 @@ def perfil_generacion(
     if proveedor_cli(modelo):
         if maximo_tokens is not None:
             raise ValueError("Los CLI de suscripción no admiten el límite de tokens DeepSeek")
-        return perfil_cli(modelo)
+        return perfil_cli(modelo, esfuerzo)
     if modelo in MODELOS_LOCALES:
         if maximo_tokens is not None:
             raise ValueError("El límite DeepSeek no corresponde a un modelo local")

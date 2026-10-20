@@ -2,15 +2,18 @@
 
 import argparse
 import base64
+import errno
 import json
 import os
 import signal
+import socket
 import socketserver
+import stat
 import threading
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 
-from aplicacion.cli_suscripcion import ErrorCLI, MODELOS_SUSCRIPCION, ejecutar_cli, ejecutable_cli, proveedor_cli
+from aplicacion.cli_suscripcion import ErrorCLI, MODELOS_SUSCRIPCION, ejecutar_cli, ejecutable_cli, proveedor_cli, validar_esfuerzo_cli
 from aplicacion.catalogo_cli import consultar_catalogo_cli
 
 
@@ -59,6 +62,9 @@ class ManejadorCLI(BaseHTTPRequestHandler):
                 raise ValueError
             if "::" in modelo and modelo not in consultar_catalogo_cli(proveedor)["modelos"]:
                 raise ValueError
+            esfuerzo = solicitud.get("esfuerzo_razonamiento")
+            if esfuerzo is not None:
+                validar_esfuerzo_cli(modelo, esfuerzo, consultar_catalogo_cli(proveedor)["modelos"].get(modelo, {}))
             if any(not isinstance(m, dict) for m in mensajes):
                 raise ValueError
             imagenes = [base64.b64decode(i, validate=True) for i in solicitud.get("imagenes_png", [])]
@@ -71,7 +77,9 @@ class ManejadorCLI(BaseHTTPRequestHandler):
             self.responder(409, {"error": "Puente CLI ocupado; la solicitud no se ejecutó", "codigo": "busy"})
             return
         try:
-            self.responder(200, ejecutar_cli(modelo, mensajes, imagenes))
+            respuesta = (ejecutar_cli(modelo, mensajes, imagenes, esfuerzo_razonamiento=esfuerzo)
+                         if esfuerzo is not None else ejecutar_cli(modelo, mensajes, imagenes))
+            self.responder(200, respuesta)
         except ErrorCLI as error:
             self.responder(503, {"error": str(error), "codigo": error.codigo})
         except Exception:
@@ -84,25 +92,52 @@ def _interrumpir(*_) -> None:
     raise KeyboardInterrupt
 
 
+def _retirar_socket_obsoleto(ruta: Path) -> None:
+    try:
+        datos = ruta.lstat()
+    except FileNotFoundError:
+        return
+    if not stat.S_ISSOCK(datos.st_mode) or datos.st_uid != os.getuid():
+        raise SystemExit("La ruta del puente debe ser un socket del usuario actual")
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conexion:
+        conexion.settimeout(1)
+        try:
+            conexion.connect(str(ruta))
+        except OSError as error:
+            if error.errno == errno.ENOENT:
+                return
+            if error.errno != errno.ECONNREFUSED:
+                raise SystemExit("No se pudo comprobar el socket existente del puente") from None
+        else:
+            raise SystemExit("El puente CLI ya está en ejecución")
+    ruta.unlink(missing_ok=True)
+
+
 def iniciar_puente(ruta: str) -> None:
     if os.name != "posix":
         raise SystemExit("En Windows usa CLI_LOCAL_HABILITADO=1 con el backend nativo")
-    socket = Path(ruta).expanduser().resolve()
+    socket = Path(ruta).expanduser().absolute()
     socket.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    if socket.exists():
-        raise SystemExit("El socket ya existe; comprueba el servicio antes de retirar un socket obsoleto")
     os.umask(0o077)
     signal.signal(signal.SIGTERM, _interrumpir)
-    with socketserver.ThreadingUnixStreamServer(str(socket), ManejadorCLI) as servidor:
-        os.chmod(socket, 0o600)
-        servidor.turno = threading.Lock()
-        servidor.timeout = 5
+    # Serializar el arranque evita que dos procesos retiren el mismo socket.
+    import fcntl
+    with socket.with_suffix(".lock").open("a") as bloqueo:
         try:
-            servidor.serve_forever()
-        except KeyboardInterrupt:
-            pass
-        finally:
-            socket.unlink(missing_ok=True)
+            fcntl.flock(bloqueo, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise SystemExit("El puente CLI ya está en ejecución") from None
+        _retirar_socket_obsoleto(socket)
+        with socketserver.ThreadingUnixStreamServer(str(socket), ManejadorCLI) as servidor:
+            os.chmod(socket, 0o600)
+            servidor.turno = threading.Lock()
+            servidor.timeout = 5
+            try:
+                servidor.serve_forever()
+            except KeyboardInterrupt:
+                pass
+            finally:
+                socket.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

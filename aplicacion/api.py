@@ -21,7 +21,7 @@ from aplicacion.base_datos import (
     ArchivoGenerado, Campana, CasoDiseno, ComparacionDigital, Ejecucion,
     InformeCalidad, InformeTopologia, VersionConjunto, crear_sesion, crear_tablas,
 )
-from aplicacion.campanas import cambiar_estado, crear_campana, previsualizar, resumen_campana, validar_matriz
+from aplicacion.campanas import cambiar_estado, crear_campana, previsualizar, resumen_campana, resolver_esfuerzos_campana, validar_matriz
 from aplicacion.configuracion import (
     DIRECTORIO_ARTEFACTOS, MODELOS_DISPONIBLES, MODELOS_LOCALES, MOTORES_DISPONIBLES, URL_EVALUADOR,
     ESFUERZOS_DISPONIBLES, ESFUERZO_PREDETERMINADO, resolver_esfuerzo,
@@ -30,7 +30,7 @@ from aplicacion.configuracion import (
     NVIDIA_MODEL_GENERATOR,
 )
 from aplicacion.conjuntos import (
-    cargar_conjunto_principal, importar_csv, importar_documento, resumen_conjunto,
+    cargar_conjunto_45, cargar_conjunto_principal, importar_csv, importar_documento, resumen_conjunto,
     validar_documento,
 )
 from aplicacion.metricas import calcular_metricas_campana
@@ -44,6 +44,7 @@ from aplicacion.tareas import tarea_analisis, tarea_campana, tarea_generacion
 
 
 aplicacion = FastAPI(title="Agente Ciel · Estudio CAD digital", version="0.2.0")
+EsfuerzoRazonamiento = Literal["low", "medium", "high", "xhigh", "max"]
 DIRECTORIO_WEB = Path(__file__).resolve().parent / "estaticos"
 if (DIRECTORIO_WEB / "assets").exists():
     aplicacion.mount("/assets", StaticFiles(directory=DIRECTORIO_WEB / "assets"), name="assets")
@@ -54,7 +55,7 @@ class SolicitudGeneracion(BaseModel):
     caso_identificador: str | None = None
     motor: str
     modelo: str
-    esfuerzo_razonamiento: Literal["low", "high", "max"] | None = None
+    esfuerzo_razonamiento: EsfuerzoRazonamiento | None = None
     modo: Literal["open-loop", "closed-loop", "quality-loop"] = "closed-loop"
     best_of_n: bool = False
     proveedor_revisores: str = Field(default="nvidia", min_length=1, max_length=60)
@@ -72,7 +73,8 @@ class SolicitudCampana(BaseModel):
     nombre: str = Field(min_length=1, max_length=150)
     conjunto_identificador: str
     modelos: list[str]
-    esfuerzo_razonamiento: Literal["low", "high", "max"] | None = None
+    esfuerzo_razonamiento: EsfuerzoRazonamiento | None = None
+    esfuerzos_por_modelo: dict[str, EsfuerzoRazonamiento] = Field(default_factory=dict)
     motores: list[str]
     modos: list[str]
     repeticiones: int = Field(default=1, ge=1, le=5)
@@ -90,6 +92,7 @@ class SolicitudPresupuesto(BaseModel):
 def preparar_base_datos() -> None:
     crear_tablas()
     cargar_conjunto_principal()
+    cargar_conjunto_45()
 
 
 @aplicacion.get("/api/salud")
@@ -102,6 +105,18 @@ def consultar_opciones() -> dict:
     nvidia_configurada = bool(os.environ.get("NVIDIA_API_KEY", "").strip())
     suscripciones = modelos_cli_configurados()
     catalogos = catalogos_cli()
+    esfuerzos = {modelo: ESFUERZOS_DISPONIBLES for modelo in MODELOS_DISPONIBLES}
+    predeterminados = {modelo: ESFUERZO_PREDETERMINADO for modelo in MODELOS_DISPONIBLES}
+    detalles_esfuerzo = {}
+    for catalogo in catalogos.values():
+        for modelo, detalle in catalogo.get("modelos", {}).items():
+            if modelo not in suscripciones:
+                continue
+            detalles_esfuerzo[modelo] = {clave: detalle.get(clave) for clave in (
+                "esfuerzo_informado", "esfuerzo_ajustable", "modelos_por_esfuerzo")}
+            if detalle.get("esfuerzos"):
+                esfuerzos[modelo] = detalle["esfuerzos"]
+                predeterminados[modelo] = detalle.get("esfuerzo_predeterminado")
     revisores = {"nvidia": "NVIDIA · API"} if nvidia_configurada else {}
     for clave, nombre in suscripciones.items():
         origen = proveedor_cli(clave)
@@ -111,10 +126,13 @@ def consultar_opciones() -> dict:
             detalle = catalogos.get(origen, {}).get("modelos", {}).get(clave, {})
             if "::" not in clave or "image" in detalle.get("modalidades", []):
                 revisores[clave] = nombre + " · todos los roles"
+    modelos = modelos_configurados()
     return {
-        "motores": MOTORES_DISPONIBLES, "modelos": modelos_configurados(),
+        "motores": MOTORES_DISPONIBLES, "modelos": modelos,
         "modelos_locales_catalogo": MODELOS_LOCALES,
-        "esfuerzos_por_modelo": {modelo: ESFUERZOS_DISPONIBLES for modelo in MODELOS_DISPONIBLES},
+        "esfuerzos_por_modelo": esfuerzos,
+        "esfuerzos_predeterminados": predeterminados,
+        "detalles_esfuerzo": detalles_esfuerzo,
         "esfuerzo_predeterminado": ESFUERZO_PREDETERMINADO,
         "modos": {"open-loop": "Una generación", "closed-loop": "Hasta cinco reparaciones",
                   "quality-loop": "Plan geométrico, métricas y hasta tres ciclos"},
@@ -467,10 +485,8 @@ def previsualizar_campana(solicitud: SolicitudCampana) -> dict:
     with crear_sesion() as sesion:
         conjunto, casos = _casos_solicitados(sesion, solicitud)
         try:
-            if solicitud.esfuerzo_razonamiento is not None and not any(
-                modelo in MODELOS_DISPONIBLES for modelo in solicitud.modelos
-            ):
-                raise ValueError("El nivel de esfuerzo requiere un modelo DeepSeek")
+            resolver_esfuerzos_campana(solicitud.modelos, solicitud.esfuerzo_razonamiento,
+                                       solicitud.esfuerzos_por_modelo)
             validar_matriz(
                 conjunto, casos, solicitud.modelos, solicitud.motores,
                 solicitud.modos, solicitud.repeticiones, solicitud.tipo,
@@ -492,6 +508,7 @@ def registrar_campana(solicitud: SolicitudCampana) -> dict:
             solicitud.semilla, solicitud.tipo, solicitud.codigos_caso,
             solicitud.presupuesto_usd,
             solicitud.esfuerzo_razonamiento,
+            solicitud.esfuerzos_por_modelo,
         )
     except ValueError as error:
         raise HTTPException(422, str(error)) from error

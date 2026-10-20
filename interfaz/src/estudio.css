@@ -33,9 +33,13 @@
 .opcion-check { display: flex; align-items: center; gap: 8px; font-size: 12px; line-height: 1.5; font-weight: 400; letter-spacing: 0; color: var(--texto); margin: 8px 0; cursor: pointer; }
 .opcion-check input { accent-color: var(--azul); width: 15px; height: 15px; margin: 0; flex-shrink: 0; }
 .opcion-check input:focus-visible { outline: 2px solid var(--foco); outline-offset: 3px; }
-.seleccion-casos > div { display: flex; flex-wrap: wrap; gap: 4px 14px; max-height: 156px; overflow: auto; border: 1px solid var(--borde); border-radius: 8px; padding: 14px; background: var(--superficie-suave); }
+.selector-conjunto { margin: 18px 0; }
+.selector-conjunto select { width: 100%; }
+.conteo-seleccion { color: var(--secundario); font-size: 11px; font-weight: 550; letter-spacing: .4px; }
+.seleccion-casos > .lista-seleccion-casos { display: flex; flex-wrap: wrap; gap: 4px 14px; max-height: 156px; overflow: auto; border: 1px solid var(--borde); border-radius: 8px; padding: 14px; background: var(--superficie-suave); }
 .seleccion-casos .opcion-check { min-width: 48px; margin: 4px 0; font-size: 11px; font-variant-numeric: tabular-nums; }
 .acciones { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 22px 0 14px; }
+.acciones-seleccion { margin: 10px 0; }
 .acciones button, .control-presupuesto button, .referencia-panel button { min-height: 38px; border: 1px solid var(--borde); background: var(--superficie-suave); color: var(--texto); border-radius: 7px; padding: 9px 14px; font-size: 12px; font-weight: 550; }
 .acciones button:not(:disabled):hover, .control-presupuesto button:not(:disabled):hover, .referencia-panel button:not(:disabled):hover { background: var(--superficie-hover); border-color: var(--tenue); }
 .acciones button.activo { background: var(--azul-suave); color: var(--azul); border-color: var(--azul); }

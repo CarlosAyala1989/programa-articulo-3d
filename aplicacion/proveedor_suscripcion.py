@@ -19,18 +19,23 @@ def catalogos_cli() -> dict:
     global _catalogos
     socket = os.environ.get("CLI_PUENTE_SOCKET", "").strip()
     identidad = socket + "|" + os.environ.get("CLI_LOCAL_HABILITADO", "0") + "|" + os.environ.get("CLI_PROVEEDORES", "")
-    if _catalogos and _catalogos[1] == identidad and time.monotonic() - _catalogos[0] < 300:
+    vigente = _catalogos and _catalogos[2] and all(
+        catalogo.get("estado") == "disponible" for catalogo in _catalogos[2].values())
+    if _catalogos and _catalogos[1] == identidad and time.monotonic() - _catalogos[0] < (300 if vigente else 10):
         return _catalogos[2]
     if socket:
         try:
-            with httpx.Client(transport=httpx.HTTPTransport(uds=socket), timeout=45) as cliente:
+            with httpx.Client(transport=httpx.HTTPTransport(uds=socket), timeout=65) as cliente:
                 respuesta = cliente.get("http://localhost/modelos")
                 respuesta.raise_for_status()
                 resultado = respuesta.json()
                 if not isinstance(resultado, dict):
                     raise ValueError
         except (httpx.HTTPError, ValueError):
-            resultado = {}
+            resultado = {proveedor: {**catalogo, "estado": "guardado",
+                         "error": "Puente CLI no disponible", "acceso_verificado": False}
+                         for proveedor, catalogo in (_catalogos[2] if _catalogos and _catalogos[1] == identidad else {}).items()
+                         if catalogo.get("modelos")}
     elif os.environ.get("CLI_LOCAL_HABILITADO", "0") == "1":
         resultado = {p: consultar_catalogo_cli(p) for p in MODELOS_SUSCRIPCION if ejecutable_cli(p)}
     else:
@@ -52,18 +57,22 @@ def modelos_cli_configurados() -> dict:
         resultado[proveedor] += " · predeterminado"
         prefijo = "Codex" if proveedor == "codex-cli" else "Antigravity"
         for clave, modelo in catalogos.get(proveedor, {}).get("modelos", {}).items():
-            resultado[clave] = f"{prefijo} · {modelo['nombre']} · suscripción"
+            resultado[clave] = f"{prefijo} · {clave.partition('::')[2]} · suscripción"
     return resultado
 
 
-def solicitar_cli(modelo: str, mensajes: list[dict], imagenes_png: list[bytes] | None = None) -> dict:
+def solicitar_cli(modelo: str, mensajes: list[dict], imagenes_png: list[bytes] | None = None,
+                  esfuerzo_razonamiento: str | None = None) -> dict:
     if modelo not in modelos_cli_configurados():
         raise ErrorCLI("Proveedor de suscripción no habilitado en el backend")
     socket = os.environ.get("CLI_PUENTE_SOCKET", "").strip()
     if not socket:
-        return ejecutar_cli(modelo, mensajes, imagenes_png)
+        return (ejecutar_cli(modelo, mensajes, imagenes_png, esfuerzo_razonamiento=esfuerzo_razonamiento)
+                if esfuerzo_razonamiento is not None else ejecutar_cli(modelo, mensajes, imagenes_png))
     cuerpo = {"modelo": modelo, "mensajes": mensajes,
               "imagenes_png": [base64.b64encode(i).decode("ascii") for i in imagenes_png or []]}
+    if esfuerzo_razonamiento is not None:
+        cuerpo["esfuerzo_razonamiento"] = esfuerzo_razonamiento
     try:
         with httpx.Client(transport=httpx.HTTPTransport(uds=socket),
                           timeout=tiempo_espera_cli() + 30) as cliente:

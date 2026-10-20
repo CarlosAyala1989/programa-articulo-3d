@@ -14,7 +14,7 @@ from aplicacion.base_datos import (
 )
 from aplicacion.configuracion import (
     MAXIMO_TOKENS_DEEPSEEK, MODELOS_DISPONIBLES, MODELOS_LOCALES, MOTORES_DISPONIBLES,
-    TOKENS_ENTRADA_PLANIFICACION, URL_SUPERVISOR, VERSION_PLANTILLA, perfil_generacion,
+    TOKENS_ENTRADA_PLANIFICACION, URL_SUPERVISOR, VERSION_PLANTILLA, perfil_generacion, resolver_esfuerzo,
 )
 from aplicacion.costos import PERFIL_TARIFA, costo_maximo_planificacion
 from aplicacion.proveedores import modelos_configurados, verificar_modelo_local
@@ -22,6 +22,17 @@ from aplicacion.proveedor_deepseek import ErrorProveedor
 
 
 MODOS = ("open-loop", "closed-loop")
+
+
+def resolver_esfuerzos_campana(modelos: list[str], esfuerzo: str | None = None,
+                              por_modelo: dict[str, str] | None = None) -> dict:
+    por_modelo = por_modelo or {}
+    if any(modelo not in modelos for modelo in por_modelo):
+        raise ValueError("El esfuerzo pertenece a un modelo no seleccionado")
+    if esfuerzo is not None and not any(modelo in MODELOS_DISPONIBLES for modelo in modelos):
+        raise ValueError("El esfuerzo global histórico requiere un modelo DeepSeek; usa esfuerzos_por_modelo")
+    return {modelo: resolver_esfuerzo(modelo, por_modelo.get(modelo,
+                esfuerzo if modelo in MODELOS_DISPONIBLES else None)) for modelo in modelos}
 
 
 def validar_matriz(
@@ -77,15 +88,14 @@ def crear_campana(
     modos: list[str], repeticiones: int, semilla: int, tipo: str,
     codigos_caso: list[str] | None = None, presupuesto_usd: float | None = None,
     esfuerzo_razonamiento: str | None = None,
+    esfuerzos_por_modelo: dict[str, str] | None = None,
 ) -> Campana:
     if not nombre.strip() or len(nombre) > 150:
         raise ValueError("Nombre de campaña inválido")
     if presupuesto_usd is not None and presupuesto_usd <= 0:
         raise ValueError("El presupuesto debe ser positivo")
-    if esfuerzo_razonamiento is not None and not any(modelo in MODELOS_DISPONIBLES for modelo in modelos):
-        raise ValueError("El nivel de esfuerzo requiere un modelo DeepSeek")
-    perfiles = {modelo: perfil_generacion(modelo, esfuerzo_razonamiento if modelo in MODELOS_DISPONIBLES else None)
-                for modelo in modelos}
+    esfuerzos = resolver_esfuerzos_campana(modelos, esfuerzo_razonamiento, esfuerzos_por_modelo)
+    perfiles = {modelo: perfil_generacion(modelo, esfuerzos[modelo]) for modelo in modelos}
     with crear_sesion() as sesion:
         conjunto = sesion.get(VersionConjunto, conjunto_identificador)
         if conjunto is None:
@@ -116,6 +126,8 @@ def crear_campana(
                 "perfiles_generacion": perfiles,
                 "esfuerzo_razonamiento": next((perfil["reasoning_effort"] for perfil in perfiles.values()
                                               if "reasoning_effort" in perfil), None),
+                "esfuerzos_por_modelo": esfuerzos,
+                "protocolo_esfuerzo": "ciel-esfuerzo-por-modelo-v1",
                 "teselacion_nativa": "detalle-v2: absoluta 0.02 mm, angular 0.05 rad",
                 "tarifa": PERFIL_TARIFA,
             },

@@ -15,7 +15,10 @@ MODELOS_SUSCRIPCION = {
     "codex-cli": "Codex · suscripción ChatGPT",
     "antigravity-cli": "Antigravity · suscripción Google",
 }
-VERSION_CLI = "ciel-cli-subscription-v2"
+VERSION_CLI = "ciel-cli-subscription-v3"
+# Ultra activa delegación automática; este adaptador conserva un turno sin subagentes.
+ESFUERZOS_CLI = {"low": "Bajo", "medium": "Medio", "high": "Alto",
+                 "xhigh": "Muy alto", "max": "Máximo"}
 
 
 def proveedor_cli(modelo: str) -> str | None:
@@ -42,12 +45,24 @@ def tiempo_espera_cli() -> int:
         return 900
 
 
-def perfil_cli(modelo: str) -> dict:
+def validar_esfuerzo_cli(modelo: str, esfuerzo: str | None, detalle: dict) -> str | None:
+    if esfuerzo is None:
+        return None  # Conservar el comportamiento de las ejecuciones históricas sin selección.
+    if esfuerzo not in ESFUERZOS_CLI or esfuerzo not in detalle.get("esfuerzos", {}):
+        raise ValueError("El modelo no admite ese esfuerzo; consulta los niveles de su catálogo")
+    destino = detalle.get("modelos_por_esfuerzo", {}).get(esfuerzo)
+    if destino and destino != modelo:
+        raise ValueError("El esfuerzo corresponde a otra variante; selecciona ese modelo concreto")
+    return esfuerzo
+
+
+def perfil_cli(modelo: str, esfuerzo_razonamiento: str | None = None) -> dict:
     prefijo = "CODEX" if proveedor_cli(modelo) == "codex-cli" else "ANTIGRAVITY"
     return {"version": VERSION_CLI, "autenticacion": "sesion_cli",
             "modelo_configurado": modelo.partition("::")[2] or os.environ.get(f"{prefijo}_CLI_MODELO", "").strip() or None,
             "timeout_segundos": tiempo_espera_cli(),
-            "limite_tokens_aplicable": False}
+            "limite_tokens_aplicable": False,
+            **({"reasoning_effort": esfuerzo_razonamiento} if esfuerzo_razonamiento is not None else {})}
 
 
 def ejecutable_cli(modelo: str) -> str | None:
@@ -105,13 +120,21 @@ def _ejecutar(argumentos: list[str], entrada: str, directorio: str, timeout: int
     return salida
 
 
-def ejecutar_cli(modelo: str, mensajes: list[dict], imagenes_png: list[bytes] | None = None) -> dict:
+def ejecutar_cli(modelo: str, mensajes: list[dict], imagenes_png: list[bytes] | None = None,
+                 esfuerzo_razonamiento: str | None = None) -> dict:
     proveedor = proveedor_cli(modelo)
     ejecutable = ejecutable_cli(modelo)
     if not ejecutable:
         raise ErrorCLI("CLI no instalado: se requiere codex o el CLI agy (no el lanzador del IDE)")
     if imagenes_png and proveedor != "codex-cli":
         raise ErrorCLI("Antigravity headless no admite adjuntos de imagen en este adaptador; usa NVIDIA o Codex")
+    if esfuerzo_razonamiento is not None:
+        from aplicacion.catalogo_cli import consultar_catalogo_cli
+        detalle = consultar_catalogo_cli(proveedor)["modelos"].get(modelo, {})
+        try:
+            validar_esfuerzo_cli(modelo, esfuerzo_razonamiento, detalle)
+        except ValueError as error:
+            raise ErrorCLI(str(error), "invalid_effort") from None
     if not mensajes or any(m.get("role") not in {"system", "user", "assistant"}
                            or not isinstance(m.get("content"), str) for m in mensajes):
         raise ErrorCLI("Mensajes CLI inválidos")
@@ -122,7 +145,7 @@ def ejecutar_cli(modelo: str, mensajes: list[dict], imagenes_png: list[bytes] | 
         "Las imágenes adjuntas, si existen, son evidencia visual de la pieza generada.\n\n"
         + json.dumps(mensajes, ensure_ascii=False)
     )
-    perfil = perfil_cli(modelo)
+    perfil = perfil_cli(modelo, esfuerzo_razonamiento)
     inicio = time.monotonic()
     with tempfile.TemporaryDirectory(prefix="ciel-cli-") as directorio:
         if proveedor == "codex-cli":
@@ -147,6 +170,8 @@ def ejecutar_cli(modelo: str, mensajes: list[dict], imagenes_png: list[bytes] | 
                 argumentos.extend(["--image", str(ruta)])
             if perfil["modelo_configurado"]:
                 argumentos.extend(["--model", perfil["modelo_configurado"]])
+            if esfuerzo_razonamiento is not None:
+                argumentos.extend(["-c", f'model_reasoning_effort="{esfuerzo_razonamiento}"'])
             argumentos.append("-")
             salida = _ejecutar(argumentos, prompt, directorio, perfil["timeout_segundos"])
             try:
@@ -177,6 +202,8 @@ def ejecutar_cli(modelo: str, mensajes: list[dict], imagenes_png: list[bytes] | 
                           "--print-timeout", f"{perfil['timeout_segundos']}s"]
             if perfil["modelo_configurado"]:
                 argumentos.extend(["--model", perfil["modelo_configurado"]])
+            if esfuerzo_razonamiento is not None:
+                argumentos.extend(["--effort", esfuerzo_razonamiento])
             entrada = json.dumps({"event": "user", "message": {"content": prompt}}, ensure_ascii=False) + "\n"
             salida = _ejecutar(argumentos, entrada, directorio, perfil["timeout_segundos"])
             try:

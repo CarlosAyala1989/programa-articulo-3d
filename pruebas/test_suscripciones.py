@@ -2,6 +2,7 @@
 
 import json
 import os
+import socket
 import subprocess
 import socketserver
 import tempfile
@@ -20,8 +21,8 @@ from aplicacion.proveedores import solicitar_codigo
 from aplicacion.calidad.modelos import RevisionCodigo
 from aplicacion.calidad.nvidia import RouterModelos
 from aplicacion.calidad.suscripcion import ProveedorRolesSuscripcion, rutas_revision, validar_revisores
-from aplicacion.puente_cli import ManejadorCLI
-from aplicacion.proveedor_suscripcion import solicitar_cli
+from aplicacion.puente_cli import ManejadorCLI, _retirar_socket_obsoleto
+from aplicacion.proveedor_suscripcion import catalogos_cli, modelos_cli_configurados, solicitar_cli
 
 
 MENSAJES = [{"role": "system", "content": "Devuelve Python"},
@@ -29,6 +30,121 @@ MENSAJES = [{"role": "system", "content": "Devuelve Python"},
 
 
 class SuscripcionesTests(unittest.TestCase):
+    def setUp(self):
+        directorio = tempfile.TemporaryDirectory()
+        self.addCleanup(directorio.cleanup)
+        for parche in (patch.dict(os.environ, {"CLI_CATALOGO_DIRECTORIO": directorio.name}),
+                       patch("aplicacion.catalogo_cli._cache", {}),
+                       patch("aplicacion.catalogo_cli._esfuerzo_antigravity", return_value={}),
+                       patch("aplicacion.proveedor_suscripcion._catalogos", None)):
+            parche.start()
+            self.addCleanup(parche.stop)
+
+    def test_socket_abandonado_se_retira_tras_apagado(self):
+        with tempfile.TemporaryDirectory() as directorio:
+            ruta = Path(directorio) / "cli.sock"
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conexion:
+                conexion.bind(str(ruta))
+            self.assertTrue(ruta.exists())
+            _retirar_socket_obsoleto(ruta)
+            self.assertFalse(ruta.exists())
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conexion:
+                conexion.bind(str(ruta))
+
+    def test_socket_activo_no_se_retira(self):
+        with tempfile.TemporaryDirectory() as directorio:
+            ruta = Path(directorio) / "cli.sock"
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conexion:
+                conexion.bind(str(ruta))
+                conexion.listen(1)
+                with self.assertRaisesRegex(SystemExit, "ya está en ejecución"):
+                    _retirar_socket_obsoleto(ruta)
+                self.assertTrue(ruta.exists())
+
+    def test_ruta_ajena_al_socket_no_se_elimina(self):
+        with tempfile.TemporaryDirectory() as directorio:
+            ruta = Path(directorio) / "cli.sock"
+            ruta.write_text("conservar", encoding="utf-8")
+            with self.assertRaises(SystemExit):
+                _retirar_socket_obsoleto(ruta)
+            self.assertEqual(ruta.read_text(), "conservar")
+            enlace = Path(directorio) / "enlace.sock"
+            enlace.symlink_to(ruta)
+            with self.assertRaises(SystemExit):
+                _retirar_socket_obsoleto(enlace)
+            self.assertTrue(enlace.is_symlink())
+
+    def test_catalogos_sobreviven_reinicio_y_se_actualizan_al_recuperarse(self):
+        for proveedor, identificador in (("codex-cli", "gpt-6.1-sol"),
+                                         ("antigravity-cli", "gemini-3.1-pro-high")):
+            clave = f"{proveedor}::{identificador}"
+            with self.subTest(proveedor=proveedor), \
+                 patch("aplicacion.catalogo_cli._cache", {}) as memoria, \
+                 patch("aplicacion.catalogo_cli.time.monotonic", return_value=0) as reloj, \
+                 patch("aplicacion.catalogo_cli.ejecutable_cli", return_value="cli"), \
+                 patch("aplicacion.catalogo_cli._modelos_codex", return_value=[{
+                     "model": identificador, "inputModalities": ["text", "image"]}]) as codex, \
+                 patch("aplicacion.catalogo_cli._ejecutar", return_value=f"{identificador}\tModelo") as agy:
+                original = consultar_catalogo_cli(proveedor)
+                self.assertEqual(original["estado"], "disponible")
+                archivo = Path(os.environ["CLI_CATALOGO_DIRECTORIO"]) / f"{proveedor}.json"
+                self.assertEqual(archivo.stat().st_mode & 0o777, 0o600)
+                memoria.clear()  # Simular otro proceso sin caché en memoria.
+                consulta = codex if proveedor == "codex-cli" else agy
+                consulta.side_effect = ErrorCLI("Sin conexión")
+                guardado = consultar_catalogo_cli(proveedor)
+                self.assertEqual(guardado["estado"], "guardado")
+                self.assertEqual(guardado["modelos"], original["modelos"])
+                self.assertIn(clave, guardado["modelos"])
+                self.assertFalse(guardado["acceso_verificado"])
+                consulta.side_effect = None
+                nuevo = identificador + "-nuevo"
+                codex.return_value = [{"model": nuevo, "inputModalities": ["text", "image"]}]
+                agy.return_value = f"{nuevo}\tModelo nuevo"
+                reloj.return_value = 11
+                actualizado = consultar_catalogo_cli(proveedor)
+                self.assertEqual(actualizado["estado"], "disponible")
+                self.assertEqual(list(actualizado["modelos"]), [f"{proveedor}::{nuevo}"])
+                memoria.clear()
+                consulta.side_effect = ErrorCLI("Sin conexión")
+                self.assertEqual(consultar_catalogo_cli(proveedor)["modelos"], actualizado["modelos"])
+                self.assertEqual(consulta.call_count, 4)
+
+    def test_catalogo_corrupto_no_bloquea_consulta(self):
+        archivo = Path(os.environ["CLI_CATALOGO_DIRECTORIO"]) / "codex-cli.json"
+        archivo.write_text("{incompleto", encoding="utf-8")
+        with patch("aplicacion.catalogo_cli.ejecutable_cli", return_value=None):
+            catalogo = consultar_catalogo_cli("codex-cli")
+        self.assertEqual(catalogo["estado"], "no_disponible")
+        self.assertEqual(catalogo["modelos"], {})
+
+    def test_backend_recupera_catalogos_sin_esperar_cinco_minutos(self):
+        catalogo = {"codex-cli": {"estado": "disponible", "modelos": {
+            "codex-cli::gpt-6.1-sol": {"nombre": "GPT"}}}}
+        respuesta = MagicMock()
+        respuesta.json.return_value = catalogo
+        with patch.dict(os.environ, {"CLI_PUENTE_SOCKET": "/puente/cli.sock"}), \
+             patch("aplicacion.proveedor_suscripcion.time.monotonic", return_value=0) as reloj, \
+             patch("aplicacion.proveedor_suscripcion.httpx.Client") as cliente:
+            obtener = cliente.return_value.__enter__.return_value.get
+            obtener.side_effect = [httpx.ConnectError("Arrancando"), respuesta,
+                                   httpx.ConnectError("Reiniciando"), respuesta]
+            self.assertEqual(catalogos_cli(), {})
+            reloj.return_value = 11
+            self.assertEqual(catalogos_cli(), catalogo)
+            reloj.return_value = 312
+            guardado = catalogos_cli()
+            self.assertEqual(guardado["codex-cli"]["estado"], "guardado")
+            self.assertEqual(guardado["codex-cli"]["modelos"], catalogo["codex-cli"]["modelos"])
+            reloj.return_value = 323
+            self.assertEqual(catalogos_cli(), catalogo)
+
+    def test_selector_muestra_identificador_exacto_aunque_nombre_sea_generico(self):
+        with patch.dict(os.environ, {"CLI_PUENTE_SOCKET": "/puente/cli.sock"}), \
+             patch("aplicacion.proveedor_suscripcion.catalogos_cli", return_value={
+                 "codex-cli": {"modelos": {"codex-cli::gpt-6.1-sol": {"nombre": "GPT"}}}}):
+            self.assertIn("gpt-6.1-sol", modelos_cli_configurados()["codex-cli::gpt-6.1-sol"])
+
     def test_modelo_concreto_prevalece_sobre_variable_y_viaja_al_cli(self):
         for modelo, variable in (("codex-cli::gpt-6.1-sol", "CODEX_CLI_MODELO"),
                                  ("antigravity-cli::gemini-3.1-pro-high", "ANTIGRAVITY_CLI_MODELO")):
@@ -198,12 +314,16 @@ class SuscripcionesTests(unittest.TestCase):
                 hilo.start()
                 try:
                     elegido = "codex-cli::gpt-6.1-sol"
-                    catalogo = {"modelos": {elegido: {"nombre": "GPT-6.1-Sol", "modalidades": ["text", "image"]}}}
+                    catalogo = {"modelos": {elegido: {"nombre": "GPT-6.1-Sol", "modalidades": ["text", "image"],
+                                                      "esfuerzos": {"high": "Alto"}}}}
                     with patch.dict(os.environ, {"CLI_PUENTE_SOCKET": ruta}), \
                          patch("aplicacion.puente_cli.consultar_catalogo_cli", return_value=catalogo), \
                          patch("aplicacion.puente_cli.ejecutar_cli", return_value={"texto": "Python"}) as cli:
                         self.assertEqual(solicitar_cli(elegido, MENSAJES), {"texto": "Python"})
                         cli.assert_called_once_with(elegido, MENSAJES, [])
+                        cli.reset_mock()
+                        self.assertEqual(solicitar_cli(elegido, MENSAJES, esfuerzo_razonamiento="high"), {"texto": "Python"})
+                        cli.assert_called_once_with(elegido, MENSAJES, [], esfuerzo_razonamiento="high")
                     with httpx.Client(transport=httpx.HTTPTransport(uds=ruta)) as cliente:
                         servidor.turno.acquire()
                         try:

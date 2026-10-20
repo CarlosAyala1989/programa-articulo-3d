@@ -15,6 +15,7 @@ from aplicacion.base_datos import CasoDiseno, VersionConjunto, crear_sesion, fec
 
 NIVELES = {"basico", "intermedio", "complejo"}
 RUTA_CONJUNTO_PRINCIPAL = Path(__file__).resolve().parent.parent / "datos" / "prompts_60_v1.json"
+RUTA_CONJUNTO_45 = Path(__file__).resolve().parent.parent / "datos" / "prompts_45_v1.json"
 
 
 def validar_documento(datos: dict) -> dict:
@@ -26,12 +27,14 @@ def validar_documento(datos: dict) -> dict:
     casos = datos.get("casos")
     if not nombre or len(nombre) > 120 or not version or len(version) > 30:
         raise ValueError("Nombre o versión de conjunto inválidos")
-    if finalidad not in {"desarrollo", "evaluacion"}:
-        raise ValueError("La finalidad debe ser desarrollo o evaluación")
+    if finalidad not in {"desarrollo", "evaluacion", "evaluacion_local_45"}:
+        raise ValueError("Finalidad de conjunto no reconocida")
     if not isinstance(casos, list) or not casos:
         raise ValueError("El conjunto debe contener casos")
     if finalidad == "evaluacion" and not 50 <= len(casos) <= 100:
         raise ValueError("Un conjunto de evaluación debe contener entre 50 y 100 casos")
+    if finalidad == "evaluacion_local_45" and len(casos) != 45:
+        raise ValueError("El conjunto de 45 prompts requiere exactamente 45 casos")
     if len(casos) > 100:
         raise ValueError("El conjunto excede cien casos")
     codigos = set()
@@ -133,6 +136,11 @@ def importar_csv(texto: str, nombre: str, version: str, finalidad: str) -> Versi
 
 def cargar_conjunto_principal() -> VersionConjunto:
     datos = json.loads(RUTA_CONJUNTO_PRINCIPAL.read_text(encoding="utf-8"))
+    return importar_documento(datos, congelar=True)
+
+
+def cargar_conjunto_45() -> VersionConjunto:
+    datos = json.loads(RUTA_CONJUNTO_45.read_text(encoding="utf-8"))
     return importar_documento(datos, congelar=True)
 
 

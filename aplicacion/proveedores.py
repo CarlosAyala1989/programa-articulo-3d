@@ -62,7 +62,8 @@ def solicitar_codigo(
     perfil = perfil_generacion(modelo, esfuerzo_razonamiento, maximo_tokens)
     if proveedor_cli(modelo):
         try:
-            return solicitar_cli(modelo, mensajes)
+            return (solicitar_cli(modelo, mensajes, esfuerzo_razonamiento=esfuerzo_razonamiento)
+                    if esfuerzo_razonamiento is not None else solicitar_cli(modelo, mensajes))
         except ErrorCLI as error:
             raise ErrorProveedor(str(error)) from None
     if modelo in MODELOS_DISPONIBLES:
