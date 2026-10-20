@@ -13,6 +13,10 @@
 - **Inspeccionar resultados:** visor 3D giratorio, historial de intentos, diagnósticos, archivos y trazas.
 - **Comparar experimentos:** 60 prompts congelados —20 básicos, 20 intermedios y 20 complejos—, campañas con ambos modos y los tres motores, métricas digitales y exportaciones CSV/JSON. Las comparaciones IoU y Chamfer requieren una referencia STEP independiente.
 
+## Programa libre para Windows
+
+La [edición libre](edicion-libre/README.md) se conserva por separado en `edicion-libre/`, con [su propio historial de versiones](edicion-libre/CHANGELOG.md) y etiquetas `libre-v<versión>`. Incluye el [instalador nativo 0.5.0](edicion-libre/entregas/0.5.0/Agente-Ciel-Nativo-0.5.0-Setup.exe), código, instrucciones y hashes. Usa cinco modelos de Ollama y conserva el lote de 45 prompts, resultados y exportaciones. Su ejecución real debe comprobarse en Windows; la aplicación de pago de esta raíz tiene su propio despliegue.
+
 ## Inicio rápido
 
 Necesitas Docker Engine con Docker Compose y una clave de DeepSeek para usar los modelos habilitados por defecto. Desde la raíz del repositorio:

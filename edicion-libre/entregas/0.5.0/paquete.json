@@ -1,0 +1,14 @@
+{
+  "version": "0.5.0",
+  "sha256_programa": "45ca70a01cb025521215a1739484de812cff69a78416f87a63c97b90a7ff5c3f",
+  "bytes_programa": 319520,
+  "origen": {
+    "version": "ciel-nativo-windows-v2",
+    "version_instalador": "0.5.0",
+    "codigo_sha256": "fcf9f60c382c3c84c714621aab8111e57e380dbc3b6be8ea0acc6927e654ef6f",
+    "protocolo": "ciel-lote-45-windows-nativo-v2",
+    "n_ejecuciones": 1350,
+    "ejecucion": "solo Windows; Ollama existente; SQLite local",
+    "validacion": "inspección estática y compilación del instalador; sin ejecutar aplicación o benchmark en Ubuntu"
+  }
+}
