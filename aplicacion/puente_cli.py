@@ -53,7 +53,7 @@ class ManejadorCLI(BaseHTTPRequestHandler):
             return
         try:
             longitud = int(self.headers.get("Content-Length", "0"))
-            if not 0 < longitud <= 16 * 1024 * 1024:
+            if longitud <= 0:
                 raise ValueError
             solicitud = json.loads(self.rfile.read(longitud))
             modelo, mensajes = solicitud["modelo"], solicitud["mensajes"]

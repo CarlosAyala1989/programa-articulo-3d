@@ -15,9 +15,10 @@ from aplicacion.base_datos import (
     crear_sesion, fecha_actual,
 )
 from aplicacion.configuracion import (
-    DIRECTORIO_ARTEFACTOS, MAXIMO_BYTES_CODIGO, MODELOS_LOCALES,
+    DIRECTORIO_ARTEFACTOS, MODELOS_LOCALES,
     URL_SUPERVISOR, VERSION_PLANTILLA, perfil_generacion, resolver_esfuerzo,
 )
+from aplicacion.limites_modelos import limites_modelo
 from aplicacion.costos import PERFIL_TARIFA, costo_estimado, costo_maximo_planificacion
 from aplicacion.proveedor_deepseek import ErrorProveedor
 from aplicacion.proveedores import solicitar_codigo, verificar_modelo_local
@@ -62,8 +63,8 @@ def extraer_codigo(texto: str) -> str:
 
 
 def revisar_codigo(codigo: str, motor: str) -> None:
-    if not codigo or len(codigo.encode("utf-8")) > MAXIMO_BYTES_CODIGO:
-        raise ValueError(f"El código está vacío o excede {MAXIMO_BYTES_CODIGO} bytes UTF-8")
+    if not codigo:
+        raise ValueError("El código está vacío")
     arbol = ast.parse(codigo)
     permitidas = IMPORTACIONES_PERMITIDAS[motor]
     for nodo in ast.walk(arbol):
@@ -267,6 +268,7 @@ def procesar_ejecucion(identificador: str) -> None:
         ]
         solicitud_registrada = {
             "mensajes": mensajes, "plantilla": VERSION_PLANTILLA,
+            "limites_modelo": limites_modelo(modelo),
             "retroalimentacion": retroalimentacion,
             "perfil": perfil_generacion(modelo, esfuerzo, maximo_tokens),
         }

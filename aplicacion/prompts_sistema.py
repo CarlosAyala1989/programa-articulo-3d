@@ -1,8 +1,5 @@
 """Instrucciones de modelado orgánico y contratos de las API CAD instaladas."""
 
-from aplicacion.configuracion import MAXIMO_BYTES_CODIGO
-
-
 # Patrones mínimos de API, no piezas de respaldo ni objetivos de evaluación.
 EJEMPLOS_API = {
     "cadquery": """import cadquery as cq
@@ -177,7 +174,6 @@ para ahorrar tokens. Usa código completo y estructurado, sin comentarios extens
 def instrucciones_sistema(motor: str) -> str:
     return (
         INSTRUCCIONES_COMUNES
-        + f"\nEl programa no debe exceder {MAXIMO_BYTES_CODIGO} bytes UTF-8.\n"
         + INSTRUCCIONES_MOTOR[motor]
         + "\nPATRÓN MÍNIMO VERIFICADO DE LOFT SUAVE (solo ilustra la API; adapta la "
           "construcción al objetivo, no lo entregues como sustituto del objeto solicitado):\n"

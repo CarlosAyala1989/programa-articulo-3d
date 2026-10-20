@@ -1,6 +1,7 @@
 """Evidencia de que el feedback completo llega a la llamada y resiste repeticiones."""
 
 import base64
+import io
 import json
 import os
 import unittest
@@ -11,7 +12,7 @@ import httpx
 from aplicacion.generacion import instrucciones_sistema, revisar_codigo
 from aplicacion.proveedor_deepseek import ErrorProveedor, solicitar_codigo
 from aplicacion.retroalimentacion import construir_solicitud, huella_codigo
-from motores.ejecutar import ejecutar
+from motores.ejecutar import ejecutar, leer_codigo
 
 
 class RetroalimentacionCompleta(unittest.TestCase):
@@ -24,9 +25,20 @@ class RetroalimentacionCompleta(unittest.TestCase):
         self.assertIn(codigo, solicitud)
         self.assertTrue(datos["codigo_anterior_completo"])
 
-    def test_limite_utf8_impide_un_argumento_de_contenedor_excesivo(self):
-        with self.assertRaisesRegex(ValueError, "bytes UTF-8"):
-            revisar_codigo("resultado = 1\n#" + "ñ" * 45000, "cadquery")
+    def test_codigo_utf8_extenso_se_conserva_completo_en_feedback(self):
+        codigo = "resultado = 1\n#" + "ñ" * 200000
+        revisar_codigo(codigo, "cadquery")
+        solicitud, _ = construir_solicitud("Cubo de 20 mm", "cadquery", [
+            {"numero": 1, "codigo": codigo, "diagnostico": "Falta un sólido", "fase_error": "cad"},
+        ])
+        self.assertIn(codigo, solicitud)
+        self.assertNotIn("90000 bytes", instrucciones_sistema("cadquery"))
+
+    def test_motor_lee_codigo_extenso_completo_desde_stdin(self):
+        codigo = "# detalle ñ\n" * 50000 + "resultado = 1\n"
+        entrada = io.TextIOWrapper(io.BytesIO((json.dumps({"codigo": codigo}, ensure_ascii=False) + "\n").encode("utf-8")))
+        with patch.dict(os.environ, {}, clear=True), patch("motores.ejecutar.sys.stdin", entrada):
+            self.assertEqual(leer_codigo(), codigo)
 
     def test_historial_causa_y_linea_antes_de_cambiar_estrategia(self):
         codigo = "resultado = pieza.edges().fillet(2)"

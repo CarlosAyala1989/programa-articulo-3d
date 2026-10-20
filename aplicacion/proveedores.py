@@ -5,7 +5,7 @@ import os
 import httpx
 
 from aplicacion.configuracion import (
-    MAXIMO_TOKENS_NVIDIA, MAXIMO_TOKENS_SALIDA, MODELOS_DISPONIBLES, MODELOS_LOCALES,
+    MAXIMO_TOKENS_NVIDIA, MODELOS_DISPONIBLES, MODELOS_LOCALES,
     MODELOS_NVIDIA_GENERADORES, MODELOS_RESPALDO_GENERACION_NVIDIA,
     MODELOS_NVIDIA_REGISTRADOS,
     NVIDIA_GENERACION_TIMEOUT_SEGUNDOS, NVIDIA_MODEL_GENERATOR, URL_OLLAMA, perfil_generacion,
@@ -88,11 +88,13 @@ def solicitar_codigo(
             try:
                 if respaldo in MODELOS_DISPONIBLES:
                     esfuerzo_respaldo = "low"
+                    # Conservar el perfil de campañas antiguas; las nuevas usan el máximo del respaldo.
+                    limite_respaldo = MAXIMO_TOKENS_NVIDIA if maximo_tokens == 8192 else None
                     perfil_respaldo = perfil_generacion(
-                        respaldo, esfuerzo_respaldo, MAXIMO_TOKENS_NVIDIA
+                        respaldo, esfuerzo_respaldo, limite_respaldo
                     )
                     salida = solicitar_deepseek(
-                        respaldo, mensajes, esfuerzo_respaldo, MAXIMO_TOKENS_NVIDIA,
+                        respaldo, mensajes, esfuerzo_respaldo, limite_respaldo,
                         tiempo_espera_segundos=NVIDIA_GENERACION_TIMEOUT_SEGUNDOS,
                     )
                     return {
@@ -150,7 +152,7 @@ def solicitar_codigo(
     cuerpo = {
         "model": identidad["etiqueta"], "messages": mensajes, "stream": False,
         "options": {"temperature": 0.2, "top_p": 0.9,
-                    "repeat_penalty": 1.05, "num_predict": MAXIMO_TOKENS_SALIDA},
+                    "repeat_penalty": 1.05, "num_predict": -1},
     }
     try:
         with httpx.Client(timeout=httpx.Timeout(300.0, connect=12.0)) as cliente:
@@ -168,5 +170,5 @@ def solicitar_codigo(
         "finalizacion": datos.get("done_reason") or "desconocida",
         "proveedor": "ollama",
         "perfil": {**identidad, "temperatura": 0.2, "top_p": 0.9,
-                   "repeat_penalty": 1.05, "num_predict": MAXIMO_TOKENS_SALIDA},
+                   "repeat_penalty": 1.05, "num_predict": -1},
     }

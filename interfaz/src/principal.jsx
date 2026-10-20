@@ -6,6 +6,7 @@ import { TrackballControls } from 'three/addons/controls/TrackballControls.js';
 import { toCreasedNormals } from 'three/addons/utils/BufferGeometryUtils.js';
 import PanelInvestigacion from './campanas.jsx';
 import CampoEsfuerzo, { nombresEsfuerzo, nivelesEsfuerzo, valorEsfuerzo } from './esfuerzo.jsx';
+import LimitesModelo from './limites.jsx';
 import './estilos.css';
 
 const nombresMotor = {
@@ -358,9 +359,10 @@ function Aplicacion() {
         <form onSubmit={iniciar}>
           <label htmlFor="descripcion">DESCRIPCIÓN DE LA PIEZA</label>
           {casoSeleccionado && <p className="nota-campana">Caso {casoSeleccionado.codigo} · {casoSeleccionado.nivel}. <button type="button" className="enlace-boton" onClick={() => cambiarCasoSeleccionado(null)}>Quitar asociación</button></p>}
-          <textarea id="descripcion" value={descripcion} onChange={(evento) => { cambiarDescripcion(evento.target.value); cambiarCasoSeleccionado(null); }} minLength={12} maxLength={4000} rows={7} placeholder="Dimensiones en milímetros, agujeros, radios, posiciones y otras restricciones…" required />
-          <div className="contador">{descripcion.length} / 4000 caracteres</div>
+          <textarea id="descripcion" value={descripcion} onChange={(evento) => { cambiarDescripcion(evento.target.value); cambiarCasoSeleccionado(null); }} minLength={12} rows={7} placeholder="Dimensiones en milímetros, agujeros, radios, posiciones y otras restricciones…" required />
+          <div className="contador">{descripcion.length.toLocaleString('es-PE')} caracteres · sin recorte de texto</div>
           <div className="campos"><div><label htmlFor="modelo">MODELO DE IA</label><select id="modelo" value={modelo} onChange={(evento) => { cambiarModelo(evento.target.value); cambiarEsfuerzo(valorEsfuerzo(opciones, evento.target.value)); }} required><option value="">Selecciona un modelo</option><OpcionesModelos modelos={opciones?.modelos || nombresModelo} /></select></div><CampoEsfuerzo identificador="esfuerzo" modelo={modelo} opciones={opciones} valor={esfuerzo} alCambiar={(nivel) => { const destino = opciones?.detalles_esfuerzo?.[modelo]?.modelos_por_esfuerzo?.[nivel]; if (destino) cambiarModelo(destino); cambiarEsfuerzo(nivel); }} /></div>
+          <LimitesModelo modelo={modelo} opciones={opciones} />
           <div className="campos"><div><label htmlFor="motor">MOTOR CAD</label><select id="motor" value={motor} onChange={(evento) => cambiarMotor(evento.target.value)}>{Object.entries(opciones?.motores || nombresMotor).map(([clave, nombre]) => <option value={clave} key={clave}>{nombre}</option>)}</select></div><div><label htmlFor="modo">ESTRATEGIA</label><select id="modo" value={modo} onChange={(evento) => cambiarModo(evento.target.value)}><option value="open-loop">Open-loop · una generación</option><option value="closed-loop">Closed-loop · hasta cinco</option>{mostrarQualityLoop && <option value="quality-loop" disabled={!opciones?.quality_loop?.disponible}>Quality Loop · métricas y revisión{!opciones?.quality_loop?.disponible ? ' (revisores no configurados)' : ''}</option>}</select></div></div>
           {modo === 'quality-loop' && <div><label htmlFor="proveedor-revisores">PLANIFICADOR Y REVISORES</label><select id="proveedor-revisores" value={proveedorRevisores} onChange={(evento) => cambiarProveedorRevisores(evento.target.value)} required><option value="" disabled>Selecciona los revisores</option><OpcionesModelos modelos={opciones?.quality_loop?.proveedores_revisores} /></select></div>}
           {opciones?.suscripciones?.configurados?.[modelo] && <p className="nota">Usa la sesión de tu cuenta en segundo plano. Cada generación, reparación y candidato consume la cuota de tu suscripción.</p>}

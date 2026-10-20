@@ -55,7 +55,7 @@ def validar_documento(datos: dict) -> dict:
             raise ValueError(f"Caso {codigo}: nivel de dificultad no reconocido")
         if not familia or len(familia) > 80 or not fundamento:
             raise ValueError(f"Caso {codigo}: faltan familia o fundamento")
-        if not 12 <= len(descripcion) <= 4000 or descripcion in descripciones:
+        if len(descripcion) < 12 or descripcion in descripciones:
             raise ValueError(f"Caso {codigo}: descripción inválida o duplicada")
         if not isinstance(especificacion, dict) or especificacion.get("unidad") != "mm":
             raise ValueError(f"Caso {codigo}: la especificación debe declarar milímetros")

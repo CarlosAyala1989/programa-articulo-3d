@@ -22,6 +22,7 @@ from aplicacion.configuracion import (
     NVIDIA_MODEL_PLANNER_FALLBACK, NVIDIA_MODEL_TEXT_JUDGE, NVIDIA_MODEL_VISUAL_REVIEWER,
     MODELO_COSMOS_EXPERIMENTAL, MODELOS_NVIDIA_CATALOGO, MODELOS_NVIDIA_REGISTRADOS,
 )
+from aplicacion.limites_modelos import maximo_salida
 
 
 class ErrorNvidia(Exception):
@@ -77,14 +78,20 @@ class ProveedorNvidia:
         self.timeout = timeout
         self.llamadas = 0
 
-    def generar(self, modelo: str, mensajes: list[dict], maximo_tokens: int = 8192,
+    def generar(self, modelo: str, mensajes: list[dict], maximo_tokens: int | None = None,
                 temperatura: float = 0.1, imagenes_png: list[bytes] | None = None,
                 esfuerzo_razonamiento: str | None = None) -> RespuestaNvidia:
         if not self._clave:
             raise ErrorNvidia("NVIDIA_API_KEY no está configurada en el backend")
         if modelo not in MODELOS_NVIDIA_REGISTRADOS:
             raise ErrorNvidia("Modelo NVIDIA no permitido por la configuración")
-        if not 1 <= maximo_tokens <= 32768 or not 0 <= temperatura <= 2:
+        limite = maximo_salida(modelo)
+        if maximo_tokens is None:
+            maximo_tokens = limite
+        if (maximo_tokens is not None and (
+            isinstance(maximo_tokens, bool) or not isinstance(maximo_tokens, int)
+            or maximo_tokens < 1 or (limite is not None and maximo_tokens > limite)
+        )) or not 0 <= temperatura <= 2:
             raise ErrorNvidia("Parámetros de inferencia NVIDIA fuera de rango")
         mensajes_solicitud = [dict(mensaje) for mensaje in mensajes]
         if imagenes_png:
@@ -100,7 +107,9 @@ class ProveedorNvidia:
                 }})
             mensajes_solicitud[indice_usuario]["content"] = contenido
         cuerpo = {"model": modelo, "messages": mensajes_solicitud, "stream": False,
-                  "max_tokens": maximo_tokens, "temperature": temperatura}
+                  "temperature": temperatura}
+        if maximo_tokens is not None:
+            cuerpo["max_tokens"] = maximo_tokens
         if esfuerzo_razonamiento:
             cuerpo["reasoning_effort"] = esfuerzo_razonamiento
         inicio = time.monotonic()

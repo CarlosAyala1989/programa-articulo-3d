@@ -443,7 +443,7 @@ class NvidiaProviderTests(unittest.TestCase):
                 "causa": "timeout",
             })
 
-    def test_timeout_nemotron_cambia_a_deepseek_pro_con_limite_acotado(self):
+    def test_timeout_nemotron_cambia_a_deepseek_pro_con_maximo_publicado(self):
         mensajes = [{"role": "user", "content": "Genera una casa simple"}]
         with patch("aplicacion.proveedores.ProveedorNvidia") as constructor, patch(
             "aplicacion.proveedores.solicitar_deepseek", return_value={
@@ -455,7 +455,8 @@ class NvidiaProviderTests(unittest.TestCase):
             resultado = solicitar_codigo("nvidia/nemotron-3-super-120b-a12b", mensajes)
         self.assertEqual(respaldo.call_args.args[0], "deepseek-v4-pro")
         self.assertEqual(respaldo.call_args.args[2], "low")
-        self.assertEqual(respaldo.call_args.args[3], 8192)
+        self.assertIsNone(respaldo.call_args.args[3])
+        self.assertEqual(resultado["perfil"]["max_tokens"], 393216)
         self.assertEqual(resultado["proveedor"], "deepseek")
         self.assertEqual(resultado["perfil"]["fallback_automatico"]["causa"], "timeout")
 

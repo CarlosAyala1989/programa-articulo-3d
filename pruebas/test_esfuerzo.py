@@ -152,6 +152,16 @@ class EsfuerzoDeepSeek(unittest.TestCase):
                 self.assertEqual(respuesta.status_code, 422)
             cola.assert_not_called()
 
+    def test_api_acepta_y_guarda_descripcion_mayor_que_cuatro_mil_caracteres(self):
+        descripcion = ("Cubo de 20 mm con detalles geométricos. " * 2000).strip()
+        with patch("aplicacion.api.crear_sesion", self.sesiones), patch("aplicacion.api.tarea_generacion.delay"):
+            respuesta = self.cliente.post("/api/ejecuciones", json={
+                "descripcion": descripcion, "motor": "cadquery", "modelo": "deepseek-flash", "modo": "open-loop",
+            })
+        self.assertEqual(respuesta.status_code, 202, respuesta.text)
+        with self.sesiones() as sesion:
+            self.assertEqual(sesion.get(Ejecucion, respuesta.json()["identificador"]).descripcion, descripcion)
+
     def test_cinco_intentos_conservan_el_esfuerzo_y_su_traza(self):
         with self.sesiones() as sesion:
             sesion.add(Ejecucion(identificador="bucle", descripcion="Pieza con curvas complejas",

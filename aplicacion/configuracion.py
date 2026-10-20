@@ -4,6 +4,7 @@ import os
 import re
 
 from aplicacion.cli_suscripcion import proveedor_cli, perfil_cli, validar_esfuerzo_cli
+from aplicacion.limites_modelos import maximo_salida
 
 
 URL_BASE_DATOS = os.environ.get(
@@ -105,14 +106,13 @@ MOTORES_DISPONIBLES = {
     "freecad": "FreeCAD Python API",
 }
 MAXIMO_INTENTOS = 5
-VERSION_PLANTILLA = "v6-quality-loop-geometric-plan"
+VERSION_PLANTILLA = "v7-limites-oficiales-sin-recorte"
 MAXIMO_TOKENS_SALIDA = 8000
 MAXIMO_TOKENS_NVIDIA = 8192
 MAXIMO_TOKENS_DEEPSEEK = 393216
 TIEMPO_ESPERA_DEEPSEEK_SEGUNDOS = 10800
 TOKENS_ENTRADA_PLANIFICACION = 65536
-# El programa viaja como una variable base64 al contenedor. 90.000 bytes UTF-8
-# mantienen ese argumento por debajo del límite individual del proceso Linux.
+# Presupuesto histórico del Quality Loop oculto. Open/closed-loop usan STDIN.
 MAXIMO_BYTES_CODIGO = 90000
 ESFUERZOS_DISPONIBLES = {"low": "Bajo", "high": "Alto", "max": "Máximo"}
 ESFUERZO_PREDETERMINADO = "max"
@@ -154,11 +154,15 @@ def perfil_generacion(
         if maximo_tokens is not None:
             raise ValueError("El límite DeepSeek no corresponde a un modelo local")
         return {"temperatura": 0.2, "top_p": 0.9, "repeat_penalty": 1.05,
-                "num_predict": MAXIMO_TOKENS_SALIDA}
+                "num_predict": -1}
     if modelo in MODELOS_NVIDIA_REGISTRADOS:
-        if maximo_tokens is not None:
-            raise ValueError("El límite DeepSeek no corresponde al endpoint NVIDIA NIM")
-        return {"max_tokens": MAXIMO_TOKENS_NVIDIA, "temperature": 0.1,
+        limite = maximo_salida(modelo)
+        if maximo_tokens is not None and (
+            isinstance(maximo_tokens, bool) or not isinstance(maximo_tokens, int)
+            or maximo_tokens < 1 or (limite is not None and maximo_tokens > limite)
+        ):
+            raise ValueError("Límite de salida NVIDIA fuera del rango publicado para el modelo")
+        return {"max_tokens": maximo_tokens if maximo_tokens is not None else limite, "temperature": 0.1,
                 "reasoning_effort": ESFUERZOS_RAZONAMIENTO_GENERACION_NVIDIA.get(modelo)}
     if maximo_tokens is not None and (
         isinstance(maximo_tokens, bool) or not isinstance(maximo_tokens, int)

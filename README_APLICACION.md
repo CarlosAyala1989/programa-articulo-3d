@@ -43,11 +43,11 @@ La tarifa de DeepSeek usada para **estimar**, no facturar, es la tarifa pico sin
 
 ## Detalle y feedback de corrección
 
-Cada intento de closed-loop recibe el objetivo original, el **programa anterior completo** (hasta 90.000 bytes UTF-8), los diagnósticos de todos los intentos fallidos, la fase de fallo y, cuando hay una excepción durante la ejecución, la línea, el fragmento de código y la traza técnica. Se detectan repeticiones del código mediante su AST, ignorando comentarios y formato; si se repite un fallo, la siguiente solicitud pide cambiar la estrategia constructiva. Las orientaciones cubren redondeos incompatibles, sólidos desconectados y errores de API de las versiones realmente instaladas. La firma del error ignora cambios de línea; las orientaciones de loft también evitan perfiles pendientes duplicados. Esto mejora el feedback, pero la IA todavía puede equivocarse: se mantienen cinco generaciones como máximo, sin ocultar ni reemplazar sus respuestas por piezas de respaldo.
+Cada intento de closed-loop recibe el objetivo original, el **programa anterior completo**, sin recorte por tamaño de texto, los diagnósticos de todos los intentos fallidos, la fase de fallo y, cuando hay una excepción durante la ejecución, la línea, el fragmento de código y la traza técnica. Se detectan repeticiones del código mediante su AST, ignorando comentarios y formato; si se repite un fallo, la siguiente solicitud pide cambiar la estrategia constructiva. Las orientaciones cubren redondeos incompatibles, sólidos desconectados y errores de API de las versiones realmente instaladas. La firma del error ignora cambios de línea; las orientaciones de loft también evitan perfiles pendientes duplicados. Esto mejora el feedback, pero la IA todavía puede equivocarse: se mantienen cinco generaciones como máximo, sin ocultar ni reemplazar sus respuestas por piezas de respaldo.
 
 La solicitud efectiva y la evidencia del runtime se conservan en `solicitud_modelo` (`mensajes`, `retroalimentacion`, `validacion_cad`, `plantilla`). El historial de la interfaz permite desplegar **Feedback de corrección** para inspeccionar el texto de la solicitud. Una ejecución pausada recupera esa evidencia antes de su próximo intento. Los fallos de proveedor o infraestructura siguen causando bloqueo, en lugar de consumir otro intento geométrico.
 
-Flash y Pro usan razonamiento habilitado con esfuerzo seleccionable (`low`, `high` o `max`; predeterminado `max`) y un máximo de **393.216 tokens (384 K)** de salida por solicitud nueva, confirmado en los metadatos `/models` de la API y en la [documentación oficial de modelos](https://api-docs.deepseek.com/api/list-models/). Es un techo, no una cantidad de tokens garantizada. Se ejecuta únicamente el contenido final del mensaje; el consumo total informado incluye los tokens de razonamiento. No se envía temperatura porque no tiene efecto en ese modo, según la [API oficial de DeepSeek](https://api-docs.deepseek.com/api/create-chat-completion/). El perfil queda guardado en cada condición e intento. Ollama conserva temperatura 0,2 y hasta 8.000 tokens de salida. El cliente admite hasta tres horas de espera de lectura para generaciones extensas. Un timeout de lectura bloquea la ejecución y no reenvía automáticamente esa petición. El código ejecutable sigue limitado a 90.000 bytes UTF-8, compatible con su transporte base64 al contenedor, pero la respuesta final del proveedor se guarda completa para conservar la trazabilidad. El mayor techo puede aumentar duración, almacenamiento y consumo por llamada.
+Flash y Pro usan razonamiento habilitado con esfuerzo seleccionable (`low`, `high` o `max`; predeterminado `max`) y un máximo de **393.216 tokens (384 K)** de salida por solicitud nueva, confirmado en los metadatos `/models` de la API y en la [documentación oficial de modelos](https://api-docs.deepseek.com/api/list-models/). Es un techo, no una cantidad de tokens garantizada. Se ejecuta únicamente el contenido final del mensaje; el consumo total informado incluye los tokens de razonamiento. No se envía temperatura porque no tiene efecto en ese modo, según la [API oficial de DeepSeek](https://api-docs.deepseek.com/api/create-chat-completion/). El perfil queda guardado en cada condición e intento. Ollama conserva temperatura 0,2 y usa `num_predict=-1` (sin tope de generación añadido por la aplicación); su contexto depende del modelo y del servidor local. El cliente admite hasta tres horas de espera de lectura para generaciones extensas. Un timeout de lectura bloquea la ejecución y no reenvía automáticamente esa petición. El código se entrega íntegro por la entrada estándar al contenedor CAD; ya no viaja en una variable de entorno ni tiene el antiguo tope de 90.000 bytes. La respuesta final del proveedor se guarda completa para conservar la trazabilidad. El mayor techo puede aumentar duración, almacenamiento y consumo por llamada.
 
 El system prompt se mantiene en `aplicacion/prompts_sistema.py`, con instrucciones comunes y contratos específicos de las tres API instaladas. Prioriza silueta orgánica, contornos spline/B-spline, lofts no reglados y barridos con perfiles orientados. Exige integrar relieves en la superficie real y comprobar que los cortes modifiquen el volumen y sean abiertos al exterior. Incluye patrones mínimos de loft verificados en cada runtime; son ejemplos de API, no piezas de respaldo. La IA debe conservar los rasgos al reparar el CAD. Para solicitudes de cabeza clava Chavín se añade una guía de interpretación estilizada con rasgos humanos/felínicos y espiga posterior, basada en [Ministerio de Cultura](https://museos.cultura.pe/sites/default/files/publicaciones/pdf/expoicpp.pdf) y [Museo Larco](https://www.museolarco.org/exposicion/exposicion-permanente/exposicion-en-linea/introduccion/cabezas-clavas-2/). La descripción explícita del usuario tiene prioridad sobre esa guía. Las referencias STEP independientes de evaluación nunca se envían a la IA.
 
@@ -318,3 +318,56 @@ Pruebas geométricas del evaluador:
 ```
 
 El piloto real B01 ejecutó 12 condiciones (Flash/Pro × tres motores × dos modos); las 12 generaron STEP/STL/FCStd cuando correspondía, se analizaron ambas rutas STL y se compararon con una referencia manual independiente. Es una prueba de integración de un caso básico, **no** un resultado estadístico de la matriz de 60 casos. La campaña principal de 720 ejecuciones permanece como borrador hasta que se inicie expresamente desde la interfaz o API.
+
+
+## Límites de modelos y texto (protocolo v7)
+
+Desde `v7-limites-oficiales-sin-recorte`, las nuevas ejecuciones open-loop y closed-loop
+no tienen el antiguo tope de 4.000 caracteres de entrada ni de 90.000 bytes de código.
+Los mensajes, el programa y el historial se envían completos. El proveedor puede rechazar
+una solicitud que exceda su contexto; la aplicación no elimina contenido para hacerla caber.
+El límite de entrada incluye instrucciones e historial, no solo la descripción del usuario.
+Una ventana compartida tampoco permite sumar simultáneamente el máximo contexto y la máxima salida.
+
+Valores consultados el **2026-10-20**, versionados en `aplicacion/limites_modelos.py` y
+expuestos en `/api/opciones` con enlaces oficiales. Las campañas nuevas y cada intento
+registran estas referencias y el perfil efectivo enviado al proveedor:
+
+| Modelo exacto | Entrada o contexto publicado | Salida publicada para esta ruta |
+| --- | --- | --- |
+| `deepseek-flash`, `deepseek-v4-pro` | 1.048.576 de contexto compartido | 393.216 |
+| `gpt-6.1-sol`, `gpt-6-astra`, `gpt-6-sol`, `gpt-6-luna`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna` | 922.000 entrada; 1.050.000 contexto | 128.000 (referencia API) |
+| `gemini-3.8-flash-low`, `gemini-3.8-flash-medium`, `gemini-3.8-flash-high` | 1.048.576 entrada; presupuesto separado | 65.536 (referencia API) |
+| `claude-sonnet-4-6`, `claude-opus-4-6-thinking` | 1M de contexto compartido | 128K (referencia API síncrona) |
+| `gpt-oss-120b-medium` | 131.072 contexto compartido | 131.072 menos el espacio consumido por la entrada (referencia del modelo) |
+| `nvidia/nemotron-3-super-120b-a12b` | 1.048.576 contexto compartido | 32.768 en NVIDIA NIM |
+| `moonshotai/kimi-k3` | 1.048.576 contexto compartido | 65.536 en NVIDIA NIM |
+| `google/gemma-4-31b-it` | 262.144 contexto compartido | 32.768 en NVIDIA NIM |
+| `z-ai/glm-5.3` | 1.048.576 contexto compartido | 131.072 |
+
+Fuentes: [DeepSeek API](https://api-docs.deepseek.com/api/create-chat-completion/),
+[contexto DeepSeek](https://api-docs.deepseek.com/quick_start/agent_integrations/codex/),
+[OpenAI GPT-6.1 Sol](https://developers.openai.com/api/docs/models/gpt-6.1-sol)
+(cada GPT tiene también su página exacta enlazada en el catálogo),
+[Gemini](https://ai.google.dev/gemini-api/docs/tokens),
+[Claude Sonnet](https://platform.claude.com/docs/en/models/sonnet-4-6/overview),
+[Claude Opus](https://platform.claude.com/docs/en/models/opus-4-6/overview),
+[GPT-OSS](https://developers.openai.com/api/docs/models/gpt-oss-120b),
+[Nemotron NIM](https://docs.api.nvidia.com/nim/reference/nvidia-nemotron-3-super-120b-a12b-infer),
+[Kimi NIM](https://docs.api.nvidia.com/nim/reference/moonshotai-kimi-k3-infer),
+[Gemma NIM](https://docs.api.nvidia.com/nim/reference/google-gemma-4-31b-it-infer) y
+[GLM API](https://docs.z.ai/api-reference/llm/chat-completion).
+
+Las solicitudes API de los modelos listados fijan `max_tokens` en su máximo documentado.
+El respaldo DeepSeek de una generación NVIDIA nueva usa también el máximo de DeepSeek.
+GPT y Antigravity se usan mediante sus CLI de suscripción: estos adaptadores no exponen
+un parámetro de tokens de salida. No se inventan flags ni se cambia a una API facturada;
+los valores de sus creadores son referencias, **no una garantía de que la suscripción
+exponga la misma capacidad**. La aplicación no añade límites de tokens a estas rutas.
+Para un modelo nuevo sin documentación verificada el catálogo informa la incertidumbre,
+sin asignarle el máximo de otro modelo.
+
+El cambio de plantilla y de imágenes CAD exige crear campañas nuevas; las campañas históricas
+conservan sus perfiles y resultados y se bloquean si se intenta ejecutarlas bajo otro protocolo.
+El Quality Loop oculto conserva sus presupuestos históricos. Los límites de aislamiento CAD
+(memoria, tiempo, archivos geométricos y procesos) son independientes de los tokens y se conservan.

@@ -39,6 +39,7 @@ from aplicacion.calidad.nvidia import ErrorNvidia, ProveedorNvidia, catalogo_rol
 from aplicacion.proveedor_deepseek import ErrorProveedor
 from aplicacion.proveedor_suscripcion import catalogos_cli, estado_puente, modelos_cli_configurados
 from aplicacion.cli_suscripcion import proveedor_cli
+from aplicacion.limites_modelos import limites_modelo
 from aplicacion.calidad.suscripcion import validar_revisores
 from aplicacion.tareas import tarea_analisis, tarea_campana, tarea_generacion
 
@@ -51,7 +52,7 @@ if (DIRECTORIO_WEB / "assets").exists():
 
 
 class SolicitudGeneracion(BaseModel):
-    descripcion: str | None = Field(default=None, max_length=4000)
+    descripcion: str | None = None
     caso_identificador: str | None = None
     motor: str
     modelo: str
@@ -129,6 +130,7 @@ def consultar_opciones() -> dict:
     modelos = modelos_configurados()
     return {
         "motores": MOTORES_DISPONIBLES, "modelos": modelos,
+        "limites_por_modelo": {modelo: limites_modelo(modelo) for modelo in modelos},
         "modelos_locales_catalogo": MODELOS_LOCALES,
         "esfuerzos_por_modelo": esfuerzos,
         "esfuerzos_predeterminados": predeterminados,
@@ -321,8 +323,8 @@ def iniciar_generacion(solicitud: SolicitudGeneracion) -> dict:
             if caso is None:
                 raise HTTPException(404, "Caso no encontrado")
             descripcion = caso.descripcion
-    if not 12 <= len(descripcion) <= 4000:
-        raise HTTPException(422, "La descripción debe tener entre 12 y 4000 caracteres")
+    if len(descripcion) < 12:
+        raise HTTPException(422, "La descripción debe tener al menos 12 caracteres")
     identificador = str(uuid4())
     with crear_sesion() as sesion:
         sesion.add(Ejecucion(

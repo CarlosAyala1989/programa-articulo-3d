@@ -17,6 +17,7 @@ from aplicacion.configuracion import (
     TOKENS_ENTRADA_PLANIFICACION, URL_SUPERVISOR, VERSION_PLANTILLA, perfil_generacion, resolver_esfuerzo,
 )
 from aplicacion.costos import PERFIL_TARIFA, costo_maximo_planificacion
+from aplicacion.limites_modelos import limites_modelo
 from aplicacion.proveedores import modelos_configurados, verificar_modelo_local
 from aplicacion.proveedor_deepseek import ErrorProveedor
 
@@ -124,6 +125,7 @@ def crear_campana(
                 "politica_parada": "primer CAD válido y exportado; máximo cinco closed-loop, uno open-loop",
                 "plantilla": VERSION_PLANTILLA, "limite_cad_segundos": 100,
                 "perfiles_generacion": perfiles,
+                "limites_modelos": {modelo: limites_modelo(modelo) for modelo in modelos},
                 "esfuerzo_razonamiento": next((perfil["reasoning_effort"] for perfil in perfiles.values()
                                               if "reasoning_effort" in perfil), None),
                 "esfuerzos_por_modelo": esfuerzos,

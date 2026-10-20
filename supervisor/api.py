@@ -1,6 +1,5 @@
 """Única capa con acceso al socket de Docker; nunca recibe la clave de IA."""
 
-import base64
 import json
 import time
 
@@ -8,7 +7,7 @@ import docker
 import requests
 from docker.errors import DockerException
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 from requests.exceptions import ReadTimeout
 
 
@@ -24,14 +23,18 @@ URL_EVALUADOR = "http://evaluador:8200"
 
 class SolicitudEjecucion(BaseModel):
     motor: str
-    codigo: str = Field(min_length=1, max_length=90_000)
+    codigo: str = Field(min_length=1)
 
-    @field_validator("codigo")
-    @classmethod
-    def validar_tamano_utf8(cls, codigo: str) -> str:
-        if len(codigo.encode("utf-8")) > 90_000:
-            raise ValueError("El programa excede 90.000 bytes UTF-8")
-        return codigo
+
+def enviar_codigo(contenedor, codigo: str) -> None:
+    """STDIN evita el límite Linux de argumentos sin escribir en la raíz del motor."""
+    datos = (json.dumps({"codigo": codigo}, ensure_ascii=False) + "\n").encode("utf-8")
+    try:
+        with contenedor.attach_socket(params={"stdin": True, "stream": True}) as entrada:
+            # Docker entrega un SocketIO abierto para lectura; su socket admite ambos sentidos.
+            entrada._sock.sendall(datos)
+    except OSError as error:
+        raise HTTPException(503, "No se pudo entregar el programa completo al motor CAD") from error
 
 
 @aplicacion.get("/salud")
@@ -62,11 +65,11 @@ def ejecutar_codigo(solicitud: SolicitudEjecucion) -> dict:
         contenedor = cliente.containers.create(
             image=IMAGENES[solicitud.motor],
             detach=True,
+            stdin_open=True,
             network_disabled=True,
             read_only=True,
             tmpfs={"/tmp": "rw,nosuid,nodev,size=256m"},
             environment={
-                "CODIGO_BASE64": base64.b64encode(solicitud.codigo.encode()).decode(),
                 "HOME": "/tmp",
                 "TMPDIR": "/tmp",
             },
@@ -78,6 +81,7 @@ def ejecutar_codigo(solicitud: SolicitudEjecucion) -> dict:
             user="10001:10001",
         )
         contenedor.start()
+        enviar_codigo(contenedor, solicitud.codigo)
         estado = contenedor.wait(timeout=100)
         salida = contenedor.logs(stdout=True, stderr=True)
         if len(salida) > 35_000_000:

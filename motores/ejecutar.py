@@ -6,6 +6,7 @@ import io
 import json
 import os
 import struct
+import sys
 import time
 import traceback
 from pathlib import Path
@@ -188,9 +189,20 @@ def respuesta_error(fase: str, error: Exception, codigo: str = "", **estados: ob
     return resultado
 
 
+def leer_codigo() -> str:
+    # Compatibilidad con supervisores anteriores y pruebas aisladas del motor.
+    if "CODIGO_BASE64" in os.environ:
+        return base64.b64decode(os.environ["CODIGO_BASE64"], validate=True).decode("utf-8")
+    solicitud = json.loads(sys.stdin.buffer.readline().decode("utf-8"))
+    codigo = solicitud.get("codigo")
+    if not isinstance(codigo, str) or not codigo:
+        raise ValueError("El supervisor no entregó un programa CAD válido")
+    return codigo
+
+
 def ejecutar() -> dict:
     motor = os.environ.get("MOTOR_CAD")
-    codigo = base64.b64decode(os.environ["CODIGO_BASE64"], validate=True).decode("utf-8")
+    codigo = leer_codigo()
     DIRECTORIO.mkdir(parents=True, exist_ok=True)
     espacio = {"__name__": "__main__"}
     try:
