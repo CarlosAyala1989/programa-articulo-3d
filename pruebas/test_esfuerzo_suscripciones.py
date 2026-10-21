@@ -150,7 +150,7 @@ class EsfuerzoSuscripcionesTests(unittest.TestCase):
         ejecutar.assert_not_called()
 
     def test_api_congela_esfuerzo_en_los_cinco_intentos(self):
-        with patch("aplicacion.api.tarea_generacion.delay"):
+        with patch("aplicacion.api.tarea_generacion.apply_async"):
             respuesta = self.cliente.post("/api/ejecuciones", json={"descripcion": "Caja de 20 mm por lado",
                 "motor": "cadquery", "modelo": GPT, "modo": "closed-loop", "esfuerzo_razonamiento": "high"})
         self.assertEqual(respuesta.status_code, 202, respuesta.text)

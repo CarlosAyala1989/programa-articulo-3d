@@ -111,6 +111,12 @@ services:
         condition: service_started
     restart: unless-stopped
 
+  # Colas independientes: actualizar GPT/NVIDIA no reinicia campañas Antigravity.
+  trabajador_codex:
+    extends:
+      service: trabajador
+    command: ["celery", "-A", "aplicacion.tareas:celeria", "worker", "--loglevel=INFO", "--concurrency=1", "--queues=codex", "--hostname=codex@%h"]
+
   # Capacidad separada: puede actualizarse sin reiniciar campañas CLI activas.
   trabajador_nvidia:
     extends:

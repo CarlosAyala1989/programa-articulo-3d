@@ -81,3 +81,24 @@ class CampanasParalelas(unittest.TestCase):
                         solicitar_cli('codex-cli', [])
                     esperar.assert_not_called()
                 self.assertEqual(enviar.call_count, llamadas)
+
+    def test_campanas_gpt_nvidia_y_antigravity_se_envian_a_colas_independientes(self):
+        from types import SimpleNamespace
+        from aplicacion.api import _cambiar_campana
+        from aplicacion.configuracion import VERSION_REINTENTOS_NVIDIA
+        for modelo, perfil, cola in (
+                ('codex-cli::gpt-5.6-luna', {'reasoning_effort': 'low'}, 'codex'),
+                ('moonshotai/kimi-k2.6', {'protocolo_reintentos': VERSION_REINTENTOS_NVIDIA}, 'nvidia'),
+                ('antigravity-cli::gemini-3.8-flash-high', {'reasoning_effort': 'high'}, 'celery')):
+            with self.subTest(modelo=modelo), patch('aplicacion.api.cambiar_estado', return_value=SimpleNamespace(
+                    configuracion={'perfiles_generacion': {modelo: perfil}})), \
+                 patch('aplicacion.api.resumen_campana', return_value={}), \
+                 patch('aplicacion.api.tarea_campana.apply_async') as separada, \
+                 patch('aplicacion.api.tarea_campana.delay') as normal:
+                _cambiar_campana('campana', 'iniciar')
+                if cola == 'celery':
+                    normal.assert_called_once_with('campana')
+                    separada.assert_not_called()
+                else:
+                    separada.assert_called_once_with(args=['campana'], queue=cola)
+                    normal.assert_not_called()

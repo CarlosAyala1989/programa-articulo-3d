@@ -345,6 +345,8 @@ def iniciar_generacion(solicitud: SolicitudGeneracion) -> dict:
     try:
         if solicitud.modelo in MODELOS_NVIDIA_REGISTRADOS and solicitud.modo != "quality-loop":
             tarea_generacion.apply_async(args=[identificador], queue="nvidia")
+        elif proveedor_cli(solicitud.modelo) == "codex-cli":
+            tarea_generacion.apply_async(args=[identificador], queue="codex")
         else:
             tarea_generacion.delay(identificador)
     except Exception as error:
@@ -589,6 +591,8 @@ def _cambiar_campana(identificador: str, accion: str) -> dict:
             perfiles = (campana.configuracion or {}).get("perfiles_generacion", {})
             if any(perfil.get("protocolo_reintentos") == VERSION_REINTENTOS_NVIDIA for perfil in perfiles.values()):
                 tarea_campana.apply_async(args=[identificador], queue="nvidia")
+            elif any(proveedor_cli(modelo) == "codex-cli" for modelo in perfiles):
+                tarea_campana.apply_async(args=[identificador], queue="codex")
             else:
                 tarea_campana.delay(identificador)
         except Exception as error:

@@ -31,3 +31,14 @@ services:
         source: ${CLI_PUENTE_DIRECTORIO:?Configurar directorio externo del puente}
         target: /puente
         read_only: true
+
+  trabajador_codex:
+    environment:
+      CLI_PUENTE_SOCKET: /puente/suscripciones-paralelo.sock
+      CLI_PROVEEDORES: codex-cli
+      CLI_TIMEOUT_SEGUNDOS: ${CLI_TIMEOUT_SEGUNDOS:-900}
+    volumes:
+      - type: bind
+        source: ${CLI_PUENTE_DIRECTORIO:?Configurar directorio externo del puente}
+        target: /puente
+        read_only: true
