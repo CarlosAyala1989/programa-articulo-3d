@@ -61,7 +61,7 @@ class ExportacionesDigitales(unittest.TestCase):
                 ruta=str(carpeta / "pieza.step"), tamano_bytes=len(self.pieza), sha256=hashlib.sha256(self.pieza).hexdigest()))
             sesion.commit()
         self.parches = ExitStack()
-        for modulo in ("api", "campanas", "metricas"):
+        for modulo in ("api", "campanas", "metricas", "conjuntos"):
             self.parches.enter_context(patch(f"aplicacion.{modulo}.crear_sesion", self.sesiones))
         self.parches.enter_context(patch("aplicacion.api.DIRECTORIO_ARTEFACTOS", str(self.raiz)))
         self.cliente = TestClient(aplicacion)

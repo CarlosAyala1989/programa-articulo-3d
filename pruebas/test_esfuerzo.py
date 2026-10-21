@@ -208,7 +208,7 @@ class EsfuerzoDeepSeek(unittest.TestCase):
                 nivel="basico", familia="cubo", fundamento="Prueba", descripcion="Cubo de 20 mm de lado"))
             sesion.commit()
         with patch("aplicacion.api.crear_sesion", self.sesiones), patch("aplicacion.campanas.crear_sesion", self.sesiones), \
-             patch("aplicacion.metricas.crear_sesion", self.sesiones):
+             patch("aplicacion.metricas.crear_sesion", self.sesiones), patch("aplicacion.conjuntos.crear_sesion", self.sesiones):
             respuesta = self.cliente.post("/api/campanas", json={
                 "nombre": "Campaña alto", "conjunto_identificador": "conjunto",
                 "modelos": ["deepseek-flash", "deepseek-v4-pro"], "motores": ["cadquery"],
