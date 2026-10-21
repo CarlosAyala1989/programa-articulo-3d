@@ -9,6 +9,7 @@ from docker.errors import DockerException
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from requests.exceptions import ReadTimeout
+from urllib3.exceptions import ReadTimeoutError
 
 
 aplicacion = FastAPI(title="Supervisor CAD")
@@ -35,6 +36,25 @@ def enviar_codigo(contenedor, codigo: str) -> None:
             entrada._sock.sendall(datos)
     except OSError as error:
         raise HTTPException(503, "No se pudo entregar el programa completo al motor CAD") from error
+
+
+def esperar_contenedor(contenedor) -> dict:
+    """Requests puede envolver el timeout de lectura del stream en ConnectionError."""
+    try:
+        return contenedor.wait(timeout=100)
+    except requests.ConnectionError as error:
+        causas = [error, *error.args]
+        vistos = set()
+        while causas:
+            causa = causas.pop()
+            if id(causa) in vistos:
+                continue
+            vistos.add(id(causa))
+            if isinstance(causa, (ReadTimeout, ReadTimeoutError)):
+                raise ReadTimeout("El motor CAD excedió 100 segundos") from error
+            if isinstance(causa, BaseException):
+                causas.extend([causa.__cause__, causa.__context__, *causa.args])
+        raise HTTPException(503, "No se pudo consultar el estado del runtime CAD") from error
 
 
 @aplicacion.get("/salud")
@@ -82,7 +102,7 @@ def ejecutar_codigo(solicitud: SolicitudEjecucion) -> dict:
         )
         contenedor.start()
         enviar_codigo(contenedor, solicitud.codigo)
-        estado = contenedor.wait(timeout=100)
+        estado = esperar_contenedor(contenedor)
         salida = contenedor.logs(stdout=True, stderr=True)
         if len(salida) > 35_000_000:
             return {
