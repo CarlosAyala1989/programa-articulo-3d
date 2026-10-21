@@ -25,17 +25,21 @@ MODELOS_NVIDIA_CATALOGO = {
     "nvidia/nemotron-3-ultra-550b-a55b": "Nemotron 3 Ultra 550B · Planner",
     "nvidia/nemotron-3-super-120b-a12b": "Nemotron 3 Super 120B · Planner/Judge",
     "poolside/laguna-xs-2.1": "Laguna XS 2.1 · Revisor de código experimental",
-    "moonshotai/kimi-k3": "Kimi K3 · Revisor visual",
+    "moonshotai/kimi-k3": "Kimi K3 · Revisor visual histórico",
+    "moonshotai/kimi-k2.6": "Kimi K2.6 · NVIDIA NIM",
     "deepseek-ai/deepseek-v4.1-flash": "DeepSeek V4.1 Flash · Endpoint NVIDIA experimental",
     "z-ai/glm-5.3": "GLM 5.3 · Juez textual",
     "google/gemma-4-31b-it": "Gemma 4 31B · Generación CAD",
 }
 MODELOS_NVIDIA_GENERADORES = {
     "nvidia/nemotron-3-super-120b-a12b": "NVIDIA NIM · Nemotron 3 Super (código)",
-    "moonshotai/kimi-k3": "NVIDIA NIM · Kimi K3 (código alternativo)",
+    "moonshotai/kimi-k2.6": "NVIDIA NIM · Kimi K2.6 (código)",
     "google/gemma-4-31b-it": "NVIDIA NIM · Gemma 4 31B (código)",
     "z-ai/glm-5.3": "NVIDIA NIM · GLM 5.3 (código)",
 }
+# El endpoint público K3 devuelve 410 y ya no consta en el catálogo autenticado.
+# Sigue registrado para interpretar trazas y campañas históricas; no se ofrece para nuevas.
+MODELOS_NVIDIA_RETIRADOS = {"moonshotai/kimi-k3"}
 ESFUERZOS_RAZONAMIENTO_GENERACION_NVIDIA = {
     "nvidia/nemotron-3-super-120b-a12b": "low",
     "nvidia/nemotron-3-ultra-550b-a55b": "medium",

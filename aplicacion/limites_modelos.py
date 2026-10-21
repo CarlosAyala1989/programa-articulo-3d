@@ -37,6 +37,12 @@ LIMITES_MODELOS = {
         "fuentes": [_NIM + "nvidia-nemotron-3-super-120b-a12b-infer",
                     _NIM + "nvidia-nemotron-3-super-120b-a12b"],
     },
+    "moonshotai/kimi-k2.6": {
+        "version": "limites-oficiales-2026-10-21-v1",
+        "contexto": 262_144, "salida": 65_536, "contexto_compartido": True,
+        "fuentes": [_NIM + "moonshotai-kimi-k2-6-infer",
+                    _NIM + "moonshotai-kimi-k2-6"],
+    },
     "moonshotai/kimi-k3": {
         "contexto": 1_048_576, "salida": 65_536, "contexto_compartido": True,
         "fuentes": [_NIM + "moonshotai-kimi-k3-infer", _NIM + "moonshotai-kimi-k3"],

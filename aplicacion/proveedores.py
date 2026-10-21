@@ -8,7 +8,7 @@ import httpx
 from aplicacion.configuracion import (
     MAXIMO_TOKENS_NVIDIA, MODELOS_DISPONIBLES, MODELOS_LOCALES,
     MODELOS_NVIDIA_GENERADORES, MODELOS_RESPALDO_GENERACION_NVIDIA,
-    MODELOS_NVIDIA_REGISTRADOS,
+    MODELOS_NVIDIA_REGISTRADOS, MODELOS_NVIDIA_RETIRADOS,
     NVIDIA_GENERACION_TIMEOUT_SEGUNDOS, NVIDIA_MODEL_GENERATOR, URL_OLLAMA, perfil_generacion,
 )
 from aplicacion.proveedor_deepseek import ErrorProveedor, solicitar_codigo as solicitar_deepseek
@@ -23,7 +23,7 @@ def modelos_configurados() -> dict:
     resultado.update(modelos_cli_configurados())
     if os.environ.get("NVIDIA_API_KEY", "").strip():
         resultado.update(MODELOS_NVIDIA_GENERADORES)
-        if NVIDIA_MODEL_GENERATOR in MODELOS_NVIDIA_REGISTRADOS:
+        if NVIDIA_MODEL_GENERATOR in MODELOS_NVIDIA_REGISTRADOS and NVIDIA_MODEL_GENERATOR not in MODELOS_NVIDIA_RETIRADOS:
             resultado.setdefault(NVIDIA_MODEL_GENERATOR, "NVIDIA NIM · " + NVIDIA_MODEL_GENERATOR)
     for codigo, perfil in MODELOS_LOCALES.items():
         if os.environ.get(perfil["variable"], "").strip():
@@ -108,7 +108,7 @@ def solicitar_codigo(
             }
             respaldo = None if reintentos_nvidia else MODELOS_RESPALDO_GENERACION_NVIDIA.get(modelo)
             if error.codigo not in errores_recuperables or not respaldo:
-                raise ErrorProveedor(str(error)) from None
+                raise ErrorProveedor(str(error), codigo=error.codigo) from None
             try:
                 if respaldo in MODELOS_DISPONIBLES:
                     esfuerzo_respaldo = "low"

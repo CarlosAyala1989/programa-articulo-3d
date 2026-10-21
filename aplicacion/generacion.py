@@ -367,7 +367,8 @@ def procesar_ejecucion(identificador: str) -> None:
                 ejecucion = sesion.get(Ejecucion, identificador)
                 intento.estado = "error_proveedor"
                 intento.fase_error = "proveedor"
-                intento.solicitud_modelo = {**solicitud_registrada, "modelo": modelo}
+                intento.solicitud_modelo = {**solicitud_registrada, "modelo": modelo,
+                    "incidencia_proveedor": {"codigo": error.codigo, "diagnostico": str(error)}}
                 intento.diagnostico = str(error)
                 intento.duracion_ia_segundos = time.monotonic() - inicio_ia
                 intento.duracion_segundos = time.monotonic() - inicio_total

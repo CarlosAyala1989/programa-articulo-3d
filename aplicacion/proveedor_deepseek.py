@@ -13,6 +13,10 @@ from aplicacion.configuracion import (
 class ErrorProveedor(Exception):
     """Fallo operativo externo que no consume otro intento científico."""
 
+    def __init__(self, mensaje: str, codigo: str = "provider_error"):
+        super().__init__(mensaje)
+        self.codigo = codigo
+
 
 def solicitar_codigo(
     modelo: str, mensajes: list[dict[str, str]], esfuerzo_razonamiento: str | None = None,

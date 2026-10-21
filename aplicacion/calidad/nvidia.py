@@ -132,6 +132,21 @@ class ProveedorNvidia:
             raise ErrorNvidia(
                 f"Error de transporte NVIDIA: {type(error).__name__}", "transport_error"
             ) from None
+        if respuesta.status_code == 410:
+            raise ErrorNvidia(
+                f"NVIDIA retiró el endpoint público de {modelo} (HTTP 410). "
+                "Cree una campaña nueva con un modelo vigente; la campaña original se conserva.",
+                "endpoint_retirado", request_id=respuesta.headers.get("x-request-id"))
+        if respuesta.status_code == 404:
+            try:
+                detalle = str(respuesta.json().get("detail", "")).lower()
+            except (ValueError, AttributeError):
+                detalle = ""
+            if "not found for account" in detalle:
+                raise ErrorNvidia(
+                    f"NVIDIA no tiene disponible la función de {modelo} para esta cuenta (HTTP 404). "
+                    "Que aparezca en el catálogo no confirma acceso de inferencia; revise la habilitación con NVIDIA.",
+                    "endpoint_no_habilitado", request_id=respuesta.headers.get("x-request-id"))
         if respuesta.status_code != 200:
             codigo = ("rate_limited" if respuesta.status_code == 429
                       else "service_unavailable" if respuesta.status_code == 503

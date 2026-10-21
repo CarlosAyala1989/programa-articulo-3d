@@ -449,3 +449,21 @@ docker compose --env-file /ruta/externa/agente-ciel.env -f compose.yaml -f compo
 ```
 
 El trabajador CLI y el puente del escritorio continúan con sus procesos actuales. Las comprobaciones de regresión simulan NVIDIA; no consumen cuentas reales.
+
+## Tres campañas simultáneas y sustitución del endpoint Kimi
+
+Los servicios `trabajador` (cola general/Antigravity), `trabajador_codex` (cola `codex`) y `trabajador_nvidia` (cola `nvidia`) pueden procesar tres campañas simultáneamente. Las generaciones y campañas nuevas con GPT se envían a `codex`; las que incluyen un perfil nuevo NVIDIA siguen yendo a `nvidia`. Cada campaña mantiene el esfuerzo y el protocolo que congeló al crearse. Los trabajadores dedicados arrancan directamente Celery y no ejecutan la recuperación global que pausaría campañas de otros procesos.
+
+Con `compose.suscripciones.yaml`, Codex utiliza un segundo puente en `CLI_PUENTE_DIRECTORIO/suscripciones-paralelo.sock`; el puente original conserva `suscripciones.sock`. Configura un segundo servicio local con los mismos parámetros de instalación, cambiando únicamente la ruta de `--socket`, o inícialo en otra terminal:
+
+```bash
+python -m aplicacion.puente_cli --socket /ruta/externa/puente/suscripciones-paralelo.sock
+```
+
+En este equipo ambos puentes están configurados con servicios de usuario; el auxiliar se habilitó para iniciar con la sesión. No es necesario reiniciar el puente original para añadir el auxiliar. Durante una campaña GPT activa no recrees `trabajador_codex`; para actualizar únicamente NVIDIA recrea `api trabajador_nvidia` con `--no-deps`.
+
+El 21 de octubre de 2026, `moonshotai/kimi-k3` dejó de aparecer en el catálogo autenticado y su endpoint público devolvió HTTP 410. [NVIDIA lo identifica como endpoint público obsoleto](https://build.nvidia.com/moonshotai/kimi-k3?section=deploy). Ahora esa respuesta se clasifica como `endpoint_retirado`, queda como incidencia del proveedor y no se reintenta indefinidamente ni se sustituye el modelo silenciosamente. K3 continúa registrado para leer campañas y trazas históricas, pero no se ofrece para crear nuevas generaciones.
+
+Se incorpora `moonshotai/kimi-k2.6`, disponible en el catálogo autenticado, como una identidad distinta. Sus límites fijados son 262.144 tokens de contexto compartido y 65.536 de salida, según la [ficha NVIDIA](https://docs.api.nvidia.com/nim/reference/moonshotai-kimi-k2-6) y su [API](https://docs.api.nvidia.com/nim/reference/moonshotai-kimi-k2-6-infer). La entrada no se recorta en la aplicación y la salida se configura con ese máximo. Elegirlo para sustituir una campaña K3 requiere crear una campaña nueva con el mismo conjunto, motores, modos, casos y semilla. La original y su diagnóstico 410 se conservan; no se atribuyen resultados K2.6 a K3.
+
+La presencia en `GET /models` confirma una entrada de catálogo, **no que la cuenta pueda inferir con ese endpoint**. Si la generación devuelve HTTP 404 con `Function ... Not found for account`, se clasifica como `endpoint_no_habilitado` y se muestra un diagnóstico sin identificadores de cuenta. No se trata como timeout ni se cambia a otro modelo automáticamente. La disponibilidad o habilitación de esa función debe revisarse con NVIDIA. En la comprobación de este equipo, K2.6 apareció en el catálogo pero su llamada de generación devolvió ese 404; no se presenta como campaña ejecutándose con éxito.
