@@ -241,7 +241,36 @@ def _bloqueo_campana(sesion, ejecucion: Ejecucion) -> str | None:
     return None
 
 
-def procesar_ejecucion(identificador: str) -> None:
+def _preparar_recuperacion(ejecucion, intentos, repetir_proveedor: bool):
+    """Recuperación explícita, auditada y sin consumir otra iteración científica."""
+    ordenados = sorted(intentos, key=lambda intento: intento.numero)
+    if ejecucion.modo not in {"open-loop", "closed-loop"} or not ordenados:
+        raise ValueError("No hay un intento clásico recuperable")
+    ultimo = ordenados[-1]
+    if any(i.estado != "invalido" for i in ordenados[:-1]):
+        raise ValueError("Hay intentos anteriores sin resolver")
+    guardada = ultimo.estado == "error_supervisor" and bool(ultimo.respuesta_modelo and ultimo.codigo)
+    sin_respuesta = ultimo.estado == "error_proveedor" and not ultimo.respuesta_modelo and not ultimo.codigo
+    if not guardada and not (sin_respuesta and repetir_proveedor):
+        raise ValueError("La recuperación requiere código guardado o autorización para repetir el proveedor")
+    solicitud = dict(ultimo.solicitud_modelo or {})
+    if not solicitud.get("mensajes") or not solicitud.get("perfil"):
+        raise ValueError("Falta la solicitud congelada del intento")
+    incidencias = list(solicitud.get("recuperaciones_operativas", []))
+    incidencias.append({
+        "protocolo": "ciel-recuperacion-explicita-v1", "fecha": fecha_actual().isoformat(),
+        "estado_anterior": ultimo.estado, "fase_error": ultimo.fase_error,
+        "diagnostico": ultimo.diagnostico, "duracion_segundos": ultimo.duracion_segundos,
+        "duracion_ia_segundos": ultimo.duracion_ia_segundos,
+        "accion": "reutilizar_respuesta" if guardada else "repetir_proveedor_autorizado",
+        "consumo_previo_desconocido": sin_respuesta,
+    })
+    ultimo.solicitud_modelo = {**solicitud, "recuperaciones_operativas": incidencias}
+    return ultimo
+
+
+def procesar_ejecucion(identificador: str, *, recuperar_interrumpido: bool = False,
+                       repetir_proveedor: bool = False) -> None:
     with crear_sesion() as sesion:
         modo = sesion.scalar(select(Ejecucion.modo).where(Ejecucion.identificador == identificador))
     if modo == "quality-loop":
@@ -252,13 +281,16 @@ def procesar_ejecucion(identificador: str) -> None:
         ejecucion = sesion.scalar(select(Ejecucion).where(
             Ejecucion.identificador == identificador
         ).with_for_update())
-        if ejecucion is None or ejecucion.estado not in {"pendiente", "pausada"}:
+        if ejecucion is None or ejecucion.estado not in ({"bloqueada"} if recuperar_interrumpido else {"pendiente", "pausada"}):
             return
         if _bloqueo_campana(sesion, ejecucion):
             sesion.commit()
             return
         intentos_previos = list(ejecucion.intentos)
-        if any(intento.estado not in {"invalido"} for intento in intentos_previos):
+        recuperado = (_preparar_recuperacion(ejecucion, intentos_previos, repetir_proveedor)
+                      if recuperar_interrumpido else None)
+        identificador_recuperado = recuperado.identificador if recuperado else None
+        if not recuperado and any(intento.estado not in {"invalido"} for intento in intentos_previos):
             ejecucion.estado = "bloqueada"
             ejecucion.mensaje = "Un intento previo quedó sin desenlace; revisar antes de repetir IA"
             sesion.commit()
@@ -276,12 +308,15 @@ def procesar_ejecucion(identificador: str) -> None:
         reintentos_nvidia = _reintentos_nvidia_ejecucion(sesion, ejecucion)
         ejecucion.esfuerzo_razonamiento = esfuerzo
         maximo = 1 if ejecucion.modo == "open-loop" else min(ejecucion.maximo_intentos, 5)
-        siguiente_intento = len(intentos_previos) + 1
+        siguiente_intento = recuperado.numero if recuperado else len(intentos_previos) + 1
+        if siguiente_intento > maximo:
+            raise ValueError("El intento supera el límite científico congelado")
+        ejecucion.fecha_fin = None
         historial = [{
             "numero": intento.numero, "codigo": intento.codigo,
             "diagnostico": intento.diagnostico, "fase_error": intento.fase_error,
             "contexto": (intento.solicitud_modelo or {}).get("validacion_cad") or {},
-        } for intento in intentos_previos]
+        } for intento in intentos_previos if intento.identificador != identificador_recuperado]
         sesion.commit()
 
     for numero in range(siguiente_intento, maximo + 1):
@@ -292,10 +327,28 @@ def procesar_ejecucion(identificador: str) -> None:
                 return
             ejecucion.numero_intentos = numero
             ejecucion.mensaje = f"Generando intento {numero} de {maximo}"
-            intento = IntentoGeneracion(
-                ejecucion_identificador=identificador, numero=numero, estado="consultando_ia"
-            )
-            sesion.add(intento)
+            intento = (sesion.get(IntentoGeneracion, identificador_recuperado)
+                       if identificador_recuperado and numero == siguiente_intento else None)
+            solicitud_guardada = dict(intento.solicitud_modelo) if intento else None
+            respuesta_guardada = None
+            if intento and intento.respuesta_modelo and intento.codigo:
+                respuesta_guardada = {
+                    "texto": intento.respuesta_modelo, "modelo_informado": intento.modelo_informado,
+                    "tokens_entrada": intento.tokens_entrada, "tokens_salida": intento.tokens_salida,
+                    "perfil": solicitud_guardada["perfil"],
+                    "finalizacion": solicitud_guardada.get("finalizacion", "stop"),
+                    "proveedor": solicitud_guardada.get("proveedor"),
+                }
+            duracion_ia_guardada = intento.duracion_ia_segundos if intento else None
+            if intento is None:
+                intento = IntentoGeneracion(
+                    ejecucion_identificador=identificador, numero=numero, estado="consultando_ia"
+                )
+                sesion.add(intento)
+            else:
+                intento.estado = "respuesta_recibida" if respuesta_guardada else "consultando_ia"
+                intento.diagnostico = ""
+                intento.fase_error = None
             sesion.commit()
             identificador_intento = intento.identificador
 
@@ -310,6 +363,9 @@ def procesar_ejecucion(identificador: str) -> None:
             "retroalimentacion": retroalimentacion,
             "perfil": perfil_generacion(modelo, esfuerzo, maximo_tokens),
         }
+        if solicitud_guardada:
+            solicitud_registrada = solicitud_guardada
+            mensajes = solicitud_guardada["mensajes"]
         if modelo in MODELOS_NVIDIA_REGISTRADOS and not reintentos_nvidia:
             solicitud_registrada["perfil"].pop("protocolo_reintentos", None)
         with crear_sesion() as sesion:
@@ -342,64 +398,69 @@ def procesar_ejecucion(identificador: str) -> None:
                 return
         inicio_total = time.monotonic()
         inicio_ia = time.monotonic()
-        try:
-            if reintentos_nvidia:
-                registrar, comprobar = _controles_reintento_nvidia(identificador, identificador_intento, solicitud_registrada)
-                respuesta = solicitar_codigo(modelo, mensajes, esfuerzo, maximo_tokens,
-                    reintentos_nvidia=True, registrar_reintento=registrar, comprobar_continuacion=comprobar)
-            else:
-                respuesta = solicitar_codigo(modelo, mensajes, esfuerzo, maximo_tokens)
-        except ReintentoNvidiaCancelado:
-            with crear_sesion() as sesion:
-                intento = sesion.get(IntentoGeneracion, identificador_intento)
-                intento.estado = "cancelado"
-                intento.diagnostico = "Campaña cancelada durante la recuperación de NVIDIA"
-                intento.duracion_ia_segundos = time.monotonic() - inicio_ia
-                ejecucion = sesion.get(Ejecucion, identificador)
-                ejecucion.estado = "cancelada"
-                ejecucion.mensaje = intento.diagnostico
-                ejecucion.fecha_fin = fecha_actual()
-                sesion.commit()
-            return
-        except ErrorProveedor as error:
-            with crear_sesion() as sesion:
-                intento = sesion.get(IntentoGeneracion, identificador_intento)
-                ejecucion = sesion.get(Ejecucion, identificador)
-                intento.estado = "error_proveedor"
-                intento.fase_error = "proveedor"
-                intento.solicitud_modelo = {**solicitud_registrada, "modelo": modelo,
-                    "incidencia_proveedor": {"codigo": error.codigo, "diagnostico": str(error)}}
-                intento.diagnostico = str(error)
-                intento.duracion_ia_segundos = time.monotonic() - inicio_ia
-                intento.duracion_segundos = time.monotonic() - inicio_total
-                ejecucion.estado = "bloqueada"
-                ejecucion.mensaje = str(error)
-                ejecucion.fecha_fin = fecha_actual()
-                sesion.commit()
-            return
+        if respuesta_guardada:
+            respuesta = respuesta_guardada
+            codigo = extraer_codigo(respuesta["texto"])
+            duracion_ia = duracion_ia_guardada
+        else:
+            try:
+                if reintentos_nvidia:
+                    registrar, comprobar = _controles_reintento_nvidia(identificador, identificador_intento, solicitud_registrada)
+                    respuesta = solicitar_codigo(modelo, mensajes, esfuerzo, maximo_tokens,
+                        reintentos_nvidia=True, registrar_reintento=registrar, comprobar_continuacion=comprobar)
+                else:
+                    respuesta = solicitar_codigo(modelo, mensajes, esfuerzo, maximo_tokens)
+            except ReintentoNvidiaCancelado:
+                with crear_sesion() as sesion:
+                    intento = sesion.get(IntentoGeneracion, identificador_intento)
+                    intento.estado = "cancelado"
+                    intento.diagnostico = "Campaña cancelada durante la recuperación de NVIDIA"
+                    intento.duracion_ia_segundos = time.monotonic() - inicio_ia
+                    ejecucion = sesion.get(Ejecucion, identificador)
+                    ejecucion.estado = "cancelada"
+                    ejecucion.mensaje = intento.diagnostico
+                    ejecucion.fecha_fin = fecha_actual()
+                    sesion.commit()
+                return
+            except ErrorProveedor as error:
+                with crear_sesion() as sesion:
+                    intento = sesion.get(IntentoGeneracion, identificador_intento)
+                    ejecucion = sesion.get(Ejecucion, identificador)
+                    intento.estado = "error_proveedor"
+                    intento.fase_error = "proveedor"
+                    intento.solicitud_modelo = {**solicitud_registrada, "modelo": modelo,
+                        "incidencia_proveedor": {"codigo": error.codigo, "diagnostico": str(error)}}
+                    intento.diagnostico = str(error)
+                    intento.duracion_ia_segundos = time.monotonic() - inicio_ia
+                    intento.duracion_segundos = time.monotonic() - inicio_total
+                    ejecucion.estado = "bloqueada"
+                    ejecucion.mensaje = str(error)
+                    ejecucion.fecha_fin = fecha_actual()
+                    sesion.commit()
+                return
 
-        duracion_ia = time.monotonic() - inicio_ia
-        codigo = extraer_codigo(respuesta["texto"])
-        # Persistir la respuesta antes de ejecutar CAD evita repetir una llamada ya recibida.
-        with crear_sesion() as sesion:
-            intento = sesion.get(IntentoGeneracion, identificador_intento)
-            intento.respuesta_modelo = respuesta["texto"]
-            intento.codigo = codigo
-            intento.modelo_informado = respuesta["modelo_informado"]
-            intento.tokens_entrada = respuesta["tokens_entrada"]
-            intento.tokens_salida = respuesta["tokens_salida"]
-            intento.costo_estimado_usd = costo_estimado(modelo, intento.tokens_entrada, intento.tokens_salida)
-            intento.duracion_ia_segundos = duracion_ia
-            intento.solicitud_modelo = {**solicitud_registrada, "perfil": respuesta.get("perfil"),
-                                       "proveedor": respuesta.get("proveedor"),
-                                       "finalizacion": respuesta.get("finalizacion"),
-                                       "tarifa": PERFIL_TARIFA if intento.costo_estimado_usd is not None else None}
-            intento.estado = "respuesta_recibida"
-            ejecucion = sesion.get(Ejecucion, identificador)
-            if ejecucion.campana_identificador and intento.costo_estimado_usd is not None:
-                campana = sesion.get(Campana, ejecucion.campana_identificador)
-                campana.gasto_estimado_usd += intento.costo_estimado_usd
-            sesion.commit()
+            duracion_ia = time.monotonic() - inicio_ia
+            codigo = extraer_codigo(respuesta["texto"])
+            # Persistir la respuesta antes de ejecutar CAD evita repetir una llamada ya recibida.
+            with crear_sesion() as sesion:
+                intento = sesion.get(IntentoGeneracion, identificador_intento)
+                intento.respuesta_modelo = respuesta["texto"]
+                intento.codigo = codigo
+                intento.modelo_informado = respuesta["modelo_informado"]
+                intento.tokens_entrada = respuesta["tokens_entrada"]
+                intento.tokens_salida = respuesta["tokens_salida"]
+                intento.costo_estimado_usd = costo_estimado(modelo, intento.tokens_entrada, intento.tokens_salida)
+                intento.duracion_ia_segundos = duracion_ia
+                intento.solicitud_modelo = {**solicitud_registrada, "perfil": respuesta.get("perfil"),
+                                           "proveedor": respuesta.get("proveedor"),
+                                           "finalizacion": respuesta.get("finalizacion"),
+                                           "tarifa": PERFIL_TARIFA if intento.costo_estimado_usd is not None else None}
+                intento.estado = "respuesta_recibida"
+                ejecucion = sesion.get(Ejecucion, identificador)
+                if ejecucion.campana_identificador and intento.costo_estimado_usd is not None:
+                    campana = sesion.get(Campana, ejecucion.campana_identificador)
+                    campana.gasto_estimado_usd += intento.costo_estimado_usd
+                sesion.commit()
         diagnostico = ""
         resultado_cad = None
         estado = "invalido"
