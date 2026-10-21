@@ -467,3 +467,15 @@ El 21 de octubre de 2026, `moonshotai/kimi-k3` dejó de aparecer en el catálogo
 Se incorpora `moonshotai/kimi-k2.6`, disponible en el catálogo autenticado, como una identidad distinta. Sus límites fijados son 262.144 tokens de contexto compartido y 65.536 de salida, según la [ficha NVIDIA](https://docs.api.nvidia.com/nim/reference/moonshotai-kimi-k2-6) y su [API](https://docs.api.nvidia.com/nim/reference/moonshotai-kimi-k2-6-infer). La entrada no se recorta en la aplicación y la salida se configura con ese máximo. Elegirlo para sustituir una campaña K3 requiere crear una campaña nueva con el mismo conjunto, motores, modos, casos y semilla. La original y su diagnóstico 410 se conservan; no se atribuyen resultados K2.6 a K3.
 
 La presencia en `GET /models` confirma una entrada de catálogo, **no que la cuenta pueda inferir con ese endpoint**. Si la generación devuelve HTTP 404 con `Function ... Not found for account`, se clasifica como `endpoint_no_habilitado` y se muestra un diagnóstico sin identificadores de cuenta. No se trata como timeout ni se cambia a otro modelo automáticamente. La disponibilidad o habilitación de esa función debe revisarse con NVIDIA. En la comprobación de este equipo, K2.6 apareció en el catálogo pero su llamada de generación devolvió ese 404; no se presenta como campaña ejecutándose con éxito.
+
+## Recuperar una campaña bloqueada desde su intento guardado
+
+Con los trabajadores libres para esa campaña y sin tareas activas o reservadas duplicadas, se puede ejecutar un auxiliar que recupera el bloqueo y después procesa los casos pendientes. No reinicia trabajadores ni puentes y no ejecuta la recuperación global del arranque:
+
+```bash
+docker compose --env-file /ruta/externa/agente-ciel.env -f compose.yaml -f compose.suscripciones.yaml run -d --no-deps --name recuperar-gpt trabajador_codex python -m aplicacion.reanudar_campana ID_CAMPANA
+```
+
+Para Antigravity se usa el servicio `trabajador`. Si el último intento terminó en `error_proveedor` sin respuesta ni código guardados, hace falta añadir `--repetir-proveedor`, después de que el investigador autorice otra llamada: el consumo anterior puede ser incierto. Si terminó en `error_supervisor` con respuesta guardada, se ejecuta ese código sin volver a consultar la IA. Otros bloqueos requieren revisión específica.
+
+La recuperación comprueba plantilla, imágenes CAD y referencias congeladas. Conserva identificadores, mensajes de la solicitud, modelo, esfuerzo, resultados terminados y numeración de intentos. El intento recuperado registra su incidente anterior, duración, fecha, acción y posible consumo desconocido en `solicitud_modelo.recuperaciones_operativas`, con protocolo `ciel-recuperacion-explicita-v1`. Los fallos CAD posteriores mantienen el límite científico original de uno o cinco intentos. El auxiliar continúa con los pendientes y termina al completar, pausar o bloquear de nuevo la campaña; su contenedor se puede retirar una vez finalizado.
