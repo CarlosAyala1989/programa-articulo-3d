@@ -111,6 +111,12 @@ services:
         condition: service_started
     restart: unless-stopped
 
+  # Capacidad separada: puede actualizarse sin reiniciar campañas CLI activas.
+  trabajador_nvidia:
+    extends:
+      service: trabajador
+    command: ["celery", "-A", "aplicacion.tareas:celeria", "worker", "--loglevel=INFO", "--concurrency=1", "--queues=nvidia", "--hostname=nvidia@%h"]
+
   supervisor:
     image: ciel-supervisor:piloto
     build:

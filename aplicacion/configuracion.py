@@ -107,6 +107,7 @@ MOTORES_DISPONIBLES = {
 }
 MAXIMO_INTENTOS = 5
 VERSION_PLANTILLA = "v7-limites-oficiales-sin-recorte"
+VERSION_REINTENTOS_NVIDIA = "ciel-nvidia-reintentos-v1"
 MAXIMO_TOKENS_SALIDA = 8000
 MAXIMO_TOKENS_NVIDIA = 8192
 MAXIMO_TOKENS_DEEPSEEK = 393216
@@ -163,6 +164,7 @@ def perfil_generacion(
         ):
             raise ValueError("Límite de salida NVIDIA fuera del rango publicado para el modelo")
         return {"max_tokens": maximo_tokens if maximo_tokens is not None else limite, "temperature": 0.1,
+                "protocolo_reintentos": VERSION_REINTENTOS_NVIDIA,
                 "reasoning_effort": ESFUERZOS_RAZONAMIENTO_GENERACION_NVIDIA.get(modelo)}
     if maximo_tokens is not None and (
         isinstance(maximo_tokens, bool) or not isinstance(maximo_tokens, int)

@@ -1,6 +1,7 @@
 """Adaptadores de inferencia con identidad comprobada del modelo local."""
 
 import os
+from collections.abc import Callable
 
 import httpx
 
@@ -14,6 +15,7 @@ from aplicacion.proveedor_deepseek import ErrorProveedor, solicitar_codigo as so
 from aplicacion.calidad.nvidia import ErrorNvidia, ProveedorNvidia
 from aplicacion.cli_suscripcion import ErrorCLI, proveedor_cli
 from aplicacion.proveedor_suscripcion import modelos_cli_configurados, solicitar_cli
+from aplicacion.reintentos_nvidia import reintentar_nvidia
 
 
 def modelos_configurados() -> dict:
@@ -57,7 +59,9 @@ def verificar_modelo_local(codigo: str) -> dict:
 
 def solicitar_codigo(
     modelo: str, mensajes: list[dict[str, str]], esfuerzo_razonamiento: str | None = None,
-    maximo_tokens: int | None = None,
+    maximo_tokens: int | None = None, *, reintentos_nvidia: bool = False,
+    registrar_reintento: Callable[[dict], None] | None = None,
+    comprobar_continuacion: Callable[[], None] | None = None,
 ) -> dict:
     perfil = perfil_generacion(modelo, esfuerzo_razonamiento, maximo_tokens)
     if proveedor_cli(modelo):
@@ -72,17 +76,37 @@ def solicitar_codigo(
         respuesta["perfil"] = {"modelo": modelo, **perfil}
         return respuesta
     if modelo in MODELOS_NVIDIA_REGISTRADOS:
+        if not reintentos_nvidia:
+            perfil.pop("protocolo_reintentos", None)
+        incidencias = []
+        numero_llamada = 0
+        timeout_actual = NVIDIA_GENERACION_TIMEOUT_SEGUNDOS
+
+        def generar():
+            nonlocal numero_llamada, timeout_actual
+            numero_llamada += 1
+            timeout_actual = (min(900, NVIDIA_GENERACION_TIMEOUT_SEGUNDOS * 2 ** min(numero_llamada - 1, 5))
+                              if reintentos_nvidia else NVIDIA_GENERACION_TIMEOUT_SEGUNDOS)
+            try:
+                return ProveedorNvidia(timeout=timeout_actual).generar(
+                    modelo, mensajes, maximo_tokens=perfil["max_tokens"],
+                    temperatura=perfil["temperature"],
+                    esfuerzo_razonamiento=perfil["reasoning_effort"],
+                )
+            except ErrorNvidia as error:
+                error.timeout_segundos = timeout_actual
+                raise
         try:
-            respuesta = ProveedorNvidia(timeout=NVIDIA_GENERACION_TIMEOUT_SEGUNDOS).generar(
-                modelo, mensajes, maximo_tokens=perfil["max_tokens"],
-                temperatura=perfil["temperature"],
-                esfuerzo_razonamiento=perfil["reasoning_effort"],
-            )
+            if reintentos_nvidia:
+                respuesta, incidencias = reintentar_nvidia(
+                    generar, modelo, registrar_reintento, comprobar_continuacion)
+            else:
+                respuesta = generar()
         except ErrorNvidia as error:
             errores_recuperables = {
                 "timeout", "transport_error", "rate_limited", "service_unavailable", "server_error",
             }
-            respaldo = MODELOS_RESPALDO_GENERACION_NVIDIA.get(modelo)
+            respaldo = None if reintentos_nvidia else MODELOS_RESPALDO_GENERACION_NVIDIA.get(modelo)
             if error.codigo not in errores_recuperables or not respaldo:
                 raise ErrorProveedor(str(error)) from None
             try:
@@ -109,6 +133,7 @@ def solicitar_codigo(
                         },
                     }
                 perfil_respaldo = perfil_generacion(respaldo)
+                perfil_respaldo.pop("protocolo_reintentos", None)
                 salida_respaldo = ProveedorNvidia(
                     timeout=NVIDIA_GENERACION_TIMEOUT_SEGUNDOS
                 ).generar(
@@ -144,7 +169,9 @@ def solicitar_codigo(
             "tokens_entrada": respuesta.tokens_entrada, "tokens_salida": respuesta.tokens_salida,
             "finalizacion": respuesta.finalizacion, "proveedor": respuesta.proveedor,
             "perfil": {"modelo": modelo, **perfil, "latencia_segundos": respuesta.latencia_segundos,
-                       "request_id": respuesta.request_id},
+                       "request_id": respuesta.request_id,
+                       "reintentos_operativos": incidencias,
+                       "timeout_ultima_llamada_segundos": timeout_actual},
         }
     if modelo not in MODELOS_LOCALES:
         raise ErrorProveedor("El modelo solicitado no está habilitado")

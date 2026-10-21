@@ -1,10 +1,13 @@
-"""Cliente NIM de NVIDIA y router de roles; nunca reintenta inferencias inciertas."""
+"""Cliente NIM de NVIDIA y router de roles; la recuperación se aplica según protocolo."""
 
 import base64
 import json
+import math
 import os
 import time
 from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 
 import httpx
 from pydantic import BaseModel, ValidationError
@@ -26,11 +29,14 @@ from aplicacion.limites_modelos import maximo_salida
 
 
 class ErrorNvidia(Exception):
-    """Error operativo sin datos de autenticación o reintentos implícitos."""
+    """Error operativo sin credenciales, con datos de espera para su recuperación."""
 
-    def __init__(self, mensaje: str, codigo: str = "provider_error"):
+    def __init__(self, mensaje: str, codigo: str = "provider_error", *,
+                 espera_segundos: float | None = None, request_id: str | None = None):
         super().__init__(mensaje)
         self.codigo = codigo
+        self.espera_segundos = espera_segundos
+        self.request_id = request_id
 
 
 @dataclass
@@ -120,7 +126,7 @@ class ProveedorNvidia:
                     f"{self.base_url}/chat/completions", json=cuerpo,
                     headers={"Authorization": f"Bearer {self._clave}", "Accept": "application/json"},
                 )
-        except httpx.ReadTimeout:
+        except httpx.TimeoutException:
             raise ErrorNvidia("Timeout NVIDIA; revisar la llamada antes de reintentar", "timeout") from None
         except httpx.HTTPError as error:
             raise ErrorNvidia(
@@ -131,17 +137,31 @@ class ProveedorNvidia:
                       else "service_unavailable" if respuesta.status_code == 503
                       else "server_error" if respuesta.status_code >= 500
                       else f"http_{respuesta.status_code}")
-            raise ErrorNvidia(f"NVIDIA respondió HTTP {respuesta.status_code}", codigo)
+            espera = None
+            valor = respuesta.headers.get("Retry-After", "")
+            try:
+                espera = max(0, float(valor)) if valor else None
+                if espera is not None and not math.isfinite(espera):
+                    espera = None
+            except (TypeError, ValueError):
+                try:
+                    espera = max(0, (parsedate_to_datetime(valor) - datetime.now(timezone.utc)).total_seconds())
+                except (TypeError, ValueError, OverflowError):
+                    pass
+            raise ErrorNvidia(f"NVIDIA respondió HTTP {respuesta.status_code}", codigo,
+                              espera_segundos=espera, request_id=respuesta.headers.get("x-request-id"))
         try:
             datos = respuesta.json()
             eleccion = datos["choices"][0]
+            if eleccion.get("finish_reason") == "content_filter" or eleccion["message"].get("refusal"):
+                raise ErrorNvidia("NVIDIA rechazó explícitamente la solicitud", "response_rejected")
             contenido = eleccion["message"].get("content")
             if isinstance(contenido, list):
                 contenido = "".join(parte.get("text", "") for parte in contenido if isinstance(parte, dict))
             if not isinstance(contenido, str) or not contenido.strip():
                 raise ValueError("contenido vacío")
             uso = datos.get("usage") or {}
-        except (ValueError, KeyError, IndexError, TypeError):
+        except (ValueError, KeyError, IndexError, TypeError, AttributeError):
             raise ErrorNvidia("Respuesta NVIDIA vacía o malformada", "malformed_response") from None
         return RespuestaNvidia(
             texto=contenido, modelo=str(datos.get("model") or modelo), proveedor="nvidia_nim",

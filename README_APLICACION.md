@@ -359,7 +359,7 @@ Fuentes: [DeepSeek API](https://api-docs.deepseek.com/api/create-chat-completion
 [GLM API](https://docs.z.ai/api-reference/llm/chat-completion).
 
 Las solicitudes API de los modelos listados fijan `max_tokens` en su máximo documentado.
-El respaldo DeepSeek de una generación NVIDIA nueva usa también el máximo de DeepSeek.
+El respaldo DeepSeek del protocolo histórico de generación NVIDIA usa también el máximo de DeepSeek. El protocolo de recuperación NVIDIA descrito abajo conserva el modelo solicitado y no activa ese respaldo.
 GPT y Antigravity se usan mediante sus CLI de suscripción: estos adaptadores no exponen
 un parámetro de tokens de salida. No se inventan flags ni se cambia a una API facturada;
 los valores de sus creadores son referencias, **no una garantía de que la suscripción
@@ -427,3 +427,25 @@ El puente tiene un turno independiente para `codex-cli` y otro para `antigravity
 Los cambios del trabajador se incorporan a su imagen al construirla. La concurrencia se aplica al recrear el trabajador; los cambios del puente se cargan al reiniciar su servicio. Haz esas operaciones cuando no haya trabajo activo. **No ejecutes `aplicacion.iniciar_trabajador` para añadir capacidad mientras otro trabajador está generando:** su recuperación de arranque marca ejecuciones interrumpidas y pausa campañas. Tampoco reinicies el puente durante una llamada.
 
 Para habilitar una segunda campaña con un despliegue anterior todavía ocupado, se puede añadir un proceso auxiliar con el mismo entorno y los mismos volúmenes, pero otro socket de puente. Antes de mover la campaña se comprueba que todas sus ejecuciones estén pendientes y que solo exista una tarea reservada; se retira únicamente esa reserva con `revoke(..., terminate=False)`, confirmando la respuesta del trabajador, y se ejecuta la campaña en el auxiliar sin pasar por la recuperación global de arranque. Nunca se revoca ni termina la tarea activa. El auxiliar se elimina al finalizar su campaña. Esta transición se utilizó para activar GPT 5.6 Luna Max mientras Gemini 3.8 Flash High seguía ejecutándose; el trabajador y el puente originales no se reiniciaron.
+
+
+## Reintentos operativos de NVIDIA
+
+Las nuevas ejecuciones y campañas **open-loop y closed-loop** de NVIDIA fijan `protocolo_reintentos=ciel-nvidia-reintentos-v1` en su perfil. Un timeout de lectura, conexión o escritura, un error de transporte, HTTP 408/429/5xx o una respuesta vacía/malformada del endpoint hacen que se reintente **el mismo modelo, mensajes y parámetros**. Las esperas son 5, 10, 20, 40 y 60 segundos; después se mantienen en 60 segundos. Se respeta una espera mayor indicada por `Retry-After`. El timeout por petición crece desde el valor configurado, duplicándose hasta 900 segundos para dar tiempo a modelos lentos; también se registra por llamada. Se continúa hasta recibir una respuesta o cancelar la campaña. Los errores de credenciales, parámetros, modelo inexistente o rechazo explícito no se repiten: quedan como incidencia del proveedor.
+
+Estos reintentos no crean otro intento CAD ni consumen las cinco iteraciones de closed-loop. Mientras se espera, la ejecución sigue `generando`, el intento indica `esperando_proveedor` y el mensaje muestra la causa y la siguiente espera. Se conservan fecha, modelo, código de incidencia, identificador de respuesta cuando existe y espera en `solicitud_modelo.reintentos_operativos`, visibles también en las exportaciones JSON y ZIP. Una falta de respuesta no se marca como código o CAD inválido y no entra en el denominador evaluable. Cuando llega código, la validación y el límite de uno/cinco intentos siguen funcionando normalmente.
+
+Cada reenvío es una llamada operativa adicional; tras un timeout el consumo de la llamada anterior puede ser desconocido. Se registra esa incertidumbre sin asignarle cero tokens o costo. La cancelación se comprueba antes de otra llamada y durante la espera. Pausar conserva la regla existente de terminar la ejecución ya iniciada; no inicia el siguiente caso.
+
+El protocolo queda congelado en las campañas nuevas. Las campañas históricas mantienen su política anterior, sus respaldos y sus resultados. Quality Loop oculto conserva su protocolo separado. No se reescriben resultados históricos para convertir fallos anteriores en éxitos.
+
+El servicio `trabajador_nvidia` consume exclusivamente la cola `nvidia`, con un proceso. Las nuevas generaciones NVIDIA se envían a esa cola; los trabajos CLI y las campañas históricas mantienen la cola anterior. El trabajador NVIDIA arranca directamente Celery, sin ejecutar la recuperación global de `iniciar_trabajador`, para poder añadirlo sin marcar como interrumpidas campañas de otro trabajador.
+
+Para actualizar esta función mientras una campaña CLI está activa, construye la imagen y recrea **solo API y trabajador NVIDIA**:
+
+```bash
+docker compose --env-file /ruta/externa/agente-ciel.env -f compose.yaml -f compose.suscripciones.yaml build api
+docker compose --env-file /ruta/externa/agente-ciel.env -f compose.yaml -f compose.suscripciones.yaml up -d --no-deps api trabajador_nvidia
+```
+
+El trabajador CLI y el puente del escritorio continúan con sus procesos actuales. Las comprobaciones de regresión simulan NVIDIA; no consumen cuentas reales.

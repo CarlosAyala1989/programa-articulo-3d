@@ -15,7 +15,7 @@ from aplicacion.base_datos import (
     crear_sesion, fecha_actual,
 )
 from aplicacion.configuracion import (
-    DIRECTORIO_ARTEFACTOS, MODELOS_LOCALES,
+    DIRECTORIO_ARTEFACTOS, MODELOS_LOCALES, MODELOS_NVIDIA_REGISTRADOS, VERSION_REINTENTOS_NVIDIA,
     URL_SUPERVISOR, VERSION_PLANTILLA, perfil_generacion, resolver_esfuerzo,
 )
 from aplicacion.limites_modelos import limites_modelo
@@ -23,6 +23,7 @@ from aplicacion.costos import PERFIL_TARIFA, costo_estimado, costo_maximo_planif
 from aplicacion.proveedor_deepseek import ErrorProveedor
 from aplicacion.proveedores import solicitar_codigo, verificar_modelo_local
 from aplicacion.retroalimentacion import construir_solicitud
+from aplicacion.reintentos_nvidia import ReintentoNvidiaCancelado
 from aplicacion.prompts_sistema import instrucciones_sistema
 
 
@@ -157,6 +158,42 @@ def _maximo_tokens_ejecucion(sesion, ejecucion: Ejecucion) -> int | None:
     return None
 
 
+def _reintentos_nvidia_ejecucion(sesion, ejecucion: Ejecucion) -> bool:
+    if ejecucion.modelo not in MODELOS_NVIDIA_REGISTRADOS:
+        return False
+    if ejecucion.campana_identificador:
+        campana = sesion.get(Campana, ejecucion.campana_identificador)
+        perfil = (campana.configuracion or {}).get("perfiles_generacion", {}).get(ejecucion.modelo, {})
+        return perfil.get("protocolo_reintentos") == VERSION_REINTENTOS_NVIDIA
+    for intento in ejecucion.intentos:
+        perfil = (intento.solicitud_modelo or {}).get("perfil")
+        if perfil:
+            return perfil.get("protocolo_reintentos") == VERSION_REINTENTOS_NVIDIA
+    return True
+
+
+def _controles_reintento_nvidia(identificador: str, identificador_intento: int, solicitud: dict):
+    def comprobar():
+        with crear_sesion() as sesion:
+            ejecucion = sesion.get(Ejecucion, identificador)
+            campana = sesion.get(Campana, ejecucion.campana_identificador) if ejecucion.campana_identificador else None
+            if ejecucion.estado == "cancelada" or (campana and campana.estado == "cancelada"):
+                raise ReintentoNvidiaCancelado()
+
+    def registrar(incidencia):
+        solicitud.setdefault("reintentos_operativos", []).append(incidencia)
+        with crear_sesion() as sesion:
+            intento = sesion.get(IntentoGeneracion, identificador_intento)
+            intento.estado = "esperando_proveedor"
+            intento.solicitud_modelo = dict(solicitud)
+            ejecucion = sesion.get(Ejecucion, identificador)
+            ejecucion.mensaje = (f"NVIDIA sin respuesta válida ({incidencia['codigo']}); "
+                f"reintento operativo {incidencia['numero']} en {incidencia['espera_segundos']:g} s. "
+                "Se conserva el mismo intento CAD")
+            sesion.commit()
+    return registrar, comprobar
+
+
 def _bloqueo_campana(sesion, ejecucion: Ejecucion) -> str | None:
     if ejecucion.estado == "cancelada":
         return "cancelada"
@@ -236,6 +273,7 @@ def procesar_ejecucion(identificador: str) -> None:
                                   if (intento.solicitud_modelo or {}).get("perfil")), None)
         esfuerzo = resolver_esfuerzo(modelo, ejecucion.esfuerzo_razonamiento or esfuerzo_anterior)
         maximo_tokens = _maximo_tokens_ejecucion(sesion, ejecucion)
+        reintentos_nvidia = _reintentos_nvidia_ejecucion(sesion, ejecucion)
         ejecucion.esfuerzo_razonamiento = esfuerzo
         maximo = 1 if ejecucion.modo == "open-loop" else min(ejecucion.maximo_intentos, 5)
         siguiente_intento = len(intentos_previos) + 1
@@ -272,6 +310,8 @@ def procesar_ejecucion(identificador: str) -> None:
             "retroalimentacion": retroalimentacion,
             "perfil": perfil_generacion(modelo, esfuerzo, maximo_tokens),
         }
+        if modelo in MODELOS_NVIDIA_REGISTRADOS and not reintentos_nvidia:
+            solicitud_registrada["perfil"].pop("protocolo_reintentos", None)
         with crear_sesion() as sesion:
             sesion.get(IntentoGeneracion, identificador_intento).solicitud_modelo = solicitud_registrada
             sesion.commit()
@@ -303,7 +343,24 @@ def procesar_ejecucion(identificador: str) -> None:
         inicio_total = time.monotonic()
         inicio_ia = time.monotonic()
         try:
-            respuesta = solicitar_codigo(modelo, mensajes, esfuerzo, maximo_tokens)
+            if reintentos_nvidia:
+                registrar, comprobar = _controles_reintento_nvidia(identificador, identificador_intento, solicitud_registrada)
+                respuesta = solicitar_codigo(modelo, mensajes, esfuerzo, maximo_tokens,
+                    reintentos_nvidia=True, registrar_reintento=registrar, comprobar_continuacion=comprobar)
+            else:
+                respuesta = solicitar_codigo(modelo, mensajes, esfuerzo, maximo_tokens)
+        except ReintentoNvidiaCancelado:
+            with crear_sesion() as sesion:
+                intento = sesion.get(IntentoGeneracion, identificador_intento)
+                intento.estado = "cancelado"
+                intento.diagnostico = "Campaña cancelada durante la recuperación de NVIDIA"
+                intento.duracion_ia_segundos = time.monotonic() - inicio_ia
+                ejecucion = sesion.get(Ejecucion, identificador)
+                ejecucion.estado = "cancelada"
+                ejecucion.mensaje = intento.diagnostico
+                ejecucion.fecha_fin = fecha_actual()
+                sesion.commit()
+            return
         except ErrorProveedor as error:
             with crear_sesion() as sesion:
                 intento = sesion.get(IntentoGeneracion, identificador_intento)

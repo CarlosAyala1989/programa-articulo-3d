@@ -20,3 +20,14 @@ services:
         source: ${CLI_PUENTE_DIRECTORIO:?Configurar directorio externo del puente}
         target: /puente
         read_only: true
+
+  trabajador_nvidia:
+    environment:
+      CLI_PUENTE_SOCKET: /puente/suscripciones.sock
+      CLI_PROVEEDORES: ${CLI_PROVEEDORES:-codex-cli,antigravity-cli}
+      CLI_TIMEOUT_SEGUNDOS: ${CLI_TIMEOUT_SEGUNDOS:-900}
+    volumes:
+      - type: bind
+        source: ${CLI_PUENTE_DIRECTORIO:?Configurar directorio externo del puente}
+        target: /puente
+        read_only: true

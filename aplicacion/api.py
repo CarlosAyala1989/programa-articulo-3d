@@ -29,7 +29,7 @@ from aplicacion.configuracion import (
     ESFUERZOS_DISPONIBLES, ESFUERZO_PREDETERMINADO, resolver_esfuerzo,
     MAXIMO_ITERACIONES_QUALITY_LOOP, MAXIMO_LLAMADAS_QUALITY_LOOP,
     MAXIMO_TOKENS_QUALITY_LOOP, MAXIMO_TOKENS_SALIDA_QUALITY_GENERADOR,
-    NVIDIA_MODEL_GENERATOR,
+    NVIDIA_MODEL_GENERATOR, MODELOS_NVIDIA_REGISTRADOS, VERSION_REINTENTOS_NVIDIA,
 )
 from aplicacion.conjuntos import (
     cargar_conjunto_45, cargar_conjunto_principal, importar_csv, importar_documento, resumen_conjunto,
@@ -343,7 +343,10 @@ def iniciar_generacion(solicitud: SolicitudGeneracion) -> dict:
         ))
         sesion.commit()
     try:
-        tarea_generacion.delay(identificador)
+        if solicitud.modelo in MODELOS_NVIDIA_REGISTRADOS and solicitud.modo != "quality-loop":
+            tarea_generacion.apply_async(args=[identificador], queue="nvidia")
+        else:
+            tarea_generacion.delay(identificador)
     except Exception as error:
         with crear_sesion() as sesion:
             ejecucion = sesion.get(Ejecucion, identificador)
@@ -583,7 +586,11 @@ def _cambiar_campana(identificador: str, accion: str) -> dict:
         raise HTTPException(409, str(error)) from error
     if accion == "iniciar":
         try:
-            tarea_campana.delay(identificador)
+            perfiles = (campana.configuracion or {}).get("perfiles_generacion", {})
+            if any(perfil.get("protocolo_reintentos") == VERSION_REINTENTOS_NVIDIA for perfil in perfiles.values()):
+                tarea_campana.apply_async(args=[identificador], queue="nvidia")
+            else:
+                tarea_campana.delay(identificador)
         except Exception as error:
             cambiar_estado(identificador, "pausar")
             raise HTTPException(503, "La cola de campañas no está disponible") from error
