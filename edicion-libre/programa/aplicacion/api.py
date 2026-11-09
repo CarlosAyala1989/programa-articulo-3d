@@ -21,7 +21,7 @@ from starlette.background import BackgroundTask
 
 from aplicacion.base_datos import (
     ArchivoGenerado, Campana, CasoDiseno, ComparacionDigital, CondicionExperimental, Ejecucion,
-    InformeCalidad, InformeTopologia, VersionConjunto, crear_sesion, crear_tablas,
+    InformeCalidad, InformeTopologia, VersionConjunto, ComparacionFisica, ResultadoExterno, crear_sesion, crear_tablas,
 )
 from aplicacion.campanas import cambiar_estado, crear_campana, previsualizar, resumen_campana, validar_matriz
 from aplicacion.configuracion import (
@@ -41,7 +41,14 @@ else:
     from aplicacion.tareas import tarea_analisis, tarea_campana, tarea_generacion
 
 
-aplicacion = FastAPI(title="Agente Ciel Libre · Estudio CAD local", version="0.5.0" if MODO_NATIVO else "0.3.0")
+aplicacion = FastAPI(title="Agente Ciel Libre · Estudio CAD local", version="0.8.0" if MODO_NATIVO else "0.3.0")
+from aplicacion.biblioteca import rutas as rutas_biblioteca
+aplicacion.include_router(rutas_biblioteca)
+from aplicacion.metrologia import rutas as rutas_metrologia, recuperar_interrumpidas
+aplicacion.include_router(rutas_metrologia)
+from aplicacion.comparativa import rutas as rutas_comparativa
+aplicacion.include_router(rutas_comparativa)
+
 DIRECTORIO_WEB = Path(os.environ.get("CIEL_DIRECTORIO_WEB", str(Path(__file__).resolve().parent / "estaticos")))
 if (DIRECTORIO_WEB / "assets").exists():
     aplicacion.mount("/assets", StaticFiles(directory=DIRECTORIO_WEB / "assets"), name="assets")
@@ -88,7 +95,11 @@ class SolicitudPresupuesto(BaseModel):
 @aplicacion.on_event("startup")
 def preparar_base_datos() -> None:
     crear_tablas()
+    recuperar_interrumpidas()
     cargar_conjunto_principal()
+    if MODO_NATIVO:
+        documento = json.loads((Path(__file__).resolve().parents[1] / "datos/prompts_45_v1.json").read_text(encoding="utf-8"))
+        importar_documento(documento, congelar=True)
 
 
 @aplicacion.get("/api/salud")
@@ -99,7 +110,7 @@ def consultar_salud() -> dict:
 @aplicacion.get("/api/opciones")
 def consultar_opciones() -> dict:
     return {
-        "edicion": "libre", "version_protocolo": "ciel-nativo-windows-v2" if MODO_NATIVO else "ciel-libre-v1",
+        "edicion": "libre", "version_aplicacion": aplicacion.version, "version_protocolo": "ciel-nativo-windows-manual-v1" if MODO_NATIVO else "ciel-libre-v1",
         "ejecucion_nativa": MODO_NATIVO,
         "motores": MOTORES_DISPONIBLES, "modelos": modelos_configurados(),
         "modelos_locales_catalogo": MODELOS_LOCALES,
@@ -322,6 +333,8 @@ def serializar_ejecucion(ejecucion: Ejecucion, topologias: list, comparacion,
     ), None)
     return {
         "identificador": ejecucion.identificador, "descripcion": ejecucion.descripcion,
+        "origen_identificador": ejecucion.origen_identificador,
+        "contexto_variante": ejecucion.contexto_variante,
         "motor": ejecucion.motor, "modelo": ejecucion.modelo,
         "esfuerzo_razonamiento": esfuerzo,
         "modo": ejecucion.modo, "caso_identificador": ejecucion.caso_identificador,
@@ -362,6 +375,7 @@ def serializar_ejecucion(ejecucion: Ejecucion, topologias: list, comparacion,
         } for intento in ejecucion.intentos],
         "archivos": [{
             "nombre": archivo.nombre, "rol": archivo.rol,
+            "intento_identificador": archivo.intento_identificador,
             "tamano_bytes": archivo.tamano_bytes, "sha256": archivo.sha256,
             "url": f"/api/ejecuciones/{ejecucion.identificador}/archivos/{archivo.nombre}",
         } for archivo in ejecucion.archivos],
@@ -400,7 +414,15 @@ def consultar_ejecucion(identificador: str) -> dict:
         informes_calidad = list(sesion.scalars(select(InformeCalidad).where(
             InformeCalidad.ejecucion_identificador == identificador
         ).order_by(InformeCalidad.iteracion, InformeCalidad.identificador)))
-        return serializar_ejecucion(ejecucion, topologias, comparacion, informes_calidad)
+        from aplicacion.biblioteca import resumen, intento_reutilizable
+        datos = serializar_ejecucion(ejecucion, topologias, comparacion, informes_calidad)
+        datos.update(resumen(sesion, ejecucion))
+        for intento, registro in zip(ejecucion.intentos, datos['intentos']):
+            registro['apto_variante'] = intento_reutilizable(ejecucion, intento)
+        datos['variantes'] = [{'identificador': e.identificador, 'modificacion': (e.contexto_variante or {}).get('modificacion', '')}
+            for e in sesion.scalars(select(Ejecucion).where(Ejecucion.origen_identificador == identificador)
+                                   .order_by(Ejecucion.fecha_creacion))]
+        return datos
 
 
 @aplicacion.post("/api/ejecuciones/{identificador}/reanalizar", status_code=202)
@@ -683,9 +705,13 @@ def descargar_datos(identificador: str) -> Response:
                           "runtime_identificador": i.runtime_identificador}
                          for i in e.intentos],
         } for e in ejecuciones]
+        from aplicacion.metrologia import serializar as serializar_fisica
+        resultados_externos = [{"identificador": r.identificador, "sha256": r.sha256, "documento": r.documento} for r in sesion.scalars(select(ResultadoExterno).where(ResultadoExterno.campana_identificador == identificador))]
+        comparaciones_fisicas = [serializar_fisica(r) for r in sesion.scalars(select(ComparacionFisica).where(
+            ComparacionFisica.ejecucion_identificador.in_(identificadores)))]
     return Response(json.dumps({"campana": campana, "metricas": metricas, "condiciones": condiciones,
                                 "conjunto": consultar_conjunto(campana["conjunto_identificador"]),
-                                "ejecuciones": datos}, ensure_ascii=False, default=str),
+                                "ejecuciones": datos, "comparaciones_fisicas": comparaciones_fisicas, "resultados_externos": resultados_externos}, ensure_ascii=False, default=str),
                     media_type="application/json",
                     headers={"Content-Disposition": f'attachment; filename="datos-{identificador}.json"'})
 
@@ -725,4 +751,4 @@ def descargar_entregables(identificador: str) -> FileResponse:
 
 @aplicacion.get("/")
 def mostrar_interfaz() -> FileResponse:
-    return FileResponse(DIRECTORIO_WEB / "index.html")
+    return FileResponse(DIRECTORIO_WEB / "index.html", headers={"Cache-Control": "no-store"})

@@ -92,7 +92,17 @@ class TareaNativa:
 
 def procesar_generacion(identificador: str) -> None:
     from aplicacion.generacion import procesar_ejecucion
-    procesar_ejecucion(identificador)
+    try:
+        procesar_ejecucion(identificador)
+    except Exception:
+        from aplicacion.base_datos import Ejecucion, crear_sesion
+        with crear_sesion() as sesion:
+            ejecucion = sesion.get(Ejecucion, identificador)
+            if ejecucion and ejecucion.estado in {'pendiente', 'generando'}:
+                ejecucion.estado = 'bloqueada'
+                ejecucion.mensaje = 'Ocurrió un error interno; consulta el registro del trabajador'
+                sesion.commit()
+        raise
 
 
 def procesar_analisis(identificador: str) -> None:

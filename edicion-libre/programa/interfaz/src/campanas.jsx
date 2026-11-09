@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import './estudio.css';
+import ComparativaExterna from './comparativa.jsx';
 
 const motoresBase = ['cadquery', 'build123d', 'freecad'];
 const modosBase = ['open-loop', 'closed-loop'];
@@ -82,18 +83,19 @@ export default function PanelInvestigacion({ pagina, opciones, alElegirCaso }) {
   const [campanaActual, cambiarCampanaActual] = useState('');
   const [resumen, cambiarResumen] = useState(null);
   const [metricas, cambiarMetricas] = useState(null);
-  const [nombre, cambiarNombre] = useState('Lote digital · 45 prompts · 5 modelos');
-  const [tipo, cambiarTipo] = useState('lote-45');
+  const [nombre, cambiarNombre] = useState('Mi campaña CAD');
+  const [tipo, cambiarTipo] = useState('seleccion');
   const [usarReferencias, cambiarUsarReferencias] = useState(false);
   const [nivelFigura, cambiarNivelFigura] = useState('todos');
-  const [casosElegidos, cambiarCasosElegidos] = useState(['B01', 'M01', 'C01']);
-  const [modelos, cambiarModelos] = useState(['L01', 'L02', 'L03', 'L04', 'L05']);
-  const [motores, cambiarMotores] = useState(motoresBase);
-  const [modos, cambiarModos] = useState(modosBase);
+  const [casosElegidos, cambiarCasosElegidos] = useState([]);
+  const [modelos, cambiarModelos] = useState([]);
+  const [motores, cambiarMotores] = useState([]);
+  const [modos, cambiarModos] = useState([]);
   const [semilla, cambiarSemilla] = useState(20261004);
   const [repeticiones, cambiarRepeticiones] = useState(1);
   const [vista, cambiarVista] = useState(null);
   const [error, cambiarError] = useState('');
+  const [avisoExportacion, cambiarAvisoExportacion] = useState('');
   const [ocupado, cambiarOcupado] = useState(false);
   const [tipoGrafico, cambiarTipoGrafico] = useState('codigo');
 
@@ -102,10 +104,6 @@ export default function PanelInvestigacion({ pagina, opciones, alElegirCaso }) {
       const [nuevosConjuntos, nuevasCampanas] = await Promise.all([pedir('/api/conjuntos'), pedir('/api/campanas')]);
       cambiarConjuntos(nuevosConjuntos);
       cambiarCampanas(nuevasCampanas);
-      if (!campanaActual) {
-        const automatica = nuevasCampanas.find((c) => c.configuracion?.automatico);
-        if (automatica) cambiarCampanaActual(automatica.identificador);
-      }
       const principal = nuevosConjuntos.find((dato) => dato.identificador === (preferido || conjunto?.identificador)) || [...nuevosConjuntos].reverse().find((dato) => dato.finalidad === 'evaluacion_local_45') || nuevosConjuntos.find((dato) => dato.nombre === 'CAD-LLMIA-60') || nuevosConjuntos[0];
       if (principal) cambiarConjunto(await pedir(`/api/conjuntos/${principal.identificador}`));
     } catch (fallo) { cambiarError(fallo.message); }
@@ -116,28 +114,32 @@ export default function PanelInvestigacion({ pagina, opciones, alElegirCaso }) {
     if (campanaActual || pagina !== 'campanas') return undefined;
     const intervalo = setInterval(() => recargar(), 5000);
     return () => clearInterval(intervalo);
-  }, [campanaActual, pagina]);
+  }, [campanaActual, pagina, conjunto?.identificador]);
   useEffect(() => { cambiarVista(null); }, [nombre, tipo, conjunto?.identificador, casosElegidos, modelos, motores, modos, semilla, repeticiones, usarReferencias]);
   useEffect(() => {
     if (!campanaActual || !['campanas', 'metricas'].includes(pagina)) return undefined;
-    cambiarResumen(null); cambiarMetricas(null);
+    cambiarResumen(null); cambiarMetricas(null); cambiarAvisoExportacion('');
     let activo = true;
     async function actualizar() {
       try {
-        const [nuevoResumen, nuevasMetricas] = await Promise.all([
-          pedir(`/api/campanas/${campanaActual}`), pedir(`/api/campanas/${campanaActual}/metricas`),
-        ]);
-        if (activo) { cambiarResumen(nuevoResumen); cambiarMetricas(nuevasMetricas); }
+        const nuevoResumen = await pedir(`/api/campanas/${campanaActual}`);
+        if (!activo) return;
+        cambiarResumen(nuevoResumen);
+        cambiarCampanas((anteriores) => anteriores.map((campana) => campana.identificador === nuevoResumen.identificador ? nuevoResumen : campana));
+        // Un fallo de métricas no debe congelar el enlace a la ejecución activa.
+        const nuevasMetricas = await pedir(`/api/campanas/${campanaActual}/metricas`);
+        if (activo) cambiarMetricas(nuevasMetricas);
       } catch (fallo) { if (activo) cambiarError(fallo.message); }
+      finally { if (activo) temporizador = setTimeout(actualizar, 4000); }
     }
+    let temporizador;
     actualizar();
-    const intervalo = setInterval(actualizar, 4000);
-    return () => { activo = false; clearInterval(intervalo); };
+    return () => { activo = false; clearTimeout(temporizador); };
   }, [campanaActual, pagina]);
 
 
   async function elegirConjunto(identificador) {
-    try { cambiarConjunto(await pedir(`/api/conjuntos/${identificador}`)); cambiarVista(null); cambiarUsarReferencias(false); }
+    try { cambiarConjunto(await pedir(`/api/conjuntos/${identificador}`)); cambiarVista(null); cambiarUsarReferencias(false); cambiarCasosElegidos([]); }
     catch (fallo) { cambiarError(fallo.message); }
   }
 
@@ -150,7 +152,7 @@ export default function PanelInvestigacion({ pagina, opciones, alElegirCaso }) {
     nombre, conjunto_identificador: conjunto?.identificador, modelos, motores, modos,
     esfuerzo_razonamiento: null,
     repeticiones: Number(repeticiones), semilla: Number(semilla), tipo,
-    codigos_caso: tipo === 'piloto' ? casosElegidos : null,
+    codigos_caso: ['piloto', 'seleccion'].includes(tipo) ? casosElegidos : null,
     usar_referencias: usarReferencias,
     presupuesto_usd: null,
   });
@@ -179,7 +181,7 @@ export default function PanelInvestigacion({ pagina, opciones, alElegirCaso }) {
   if (!['casos', 'campanas', 'metricas'].includes(pagina)) return null;
 
   return <section className="investigacion">
-    {pagina === 'campanas' && <p className="nota-campana"><strong>Lote automático incluido:</strong> tus 45 prompts, los cinco modelos, los tres motores y ambos modos. Se inicia al preparar Windows y se recupera al abrirlo o iniciar sesión. Resultados en <strong>Documentos / CielLibre / Resultados</strong> y acceso «Resultados» del menú Inicio. No necesitas crear otra campaña.</p>}
+    {pagina === 'campanas' && <p className="nota-campana"><strong>Inicio manual:</strong> elige el conjunto de prompts, los modelos instalados y las librerías CAD. Calcula la matriz, guarda la campaña y pulsa «Iniciar campaña» cuando estés listo. Abrir el programa conserva las campañas pausadas. Descarga los resultados desde la campaña.</p>}
     {['casos', 'campanas'].includes(pagina) && <details className="panel-campana" open={pagina === 'casos'}><summary><strong>Conjuntos de prompts e importación</strong></summary><label htmlFor="conjunto-activo">CONJUNTO DE PROMPTS</label><select id="conjunto-activo" value={conjunto?.identificador || ''} onChange={(e) => elegirConjunto(e.target.value)}>{conjuntos.map((dato) => <option key={dato.identificador} value={dato.identificador}>{dato.nombre} · {dato.version} · {dato.total} prompts</option>)}</select><ImportadorPrompts45 alImportar={(id) => recargar(id)} /></details>}
 
     {pagina === 'casos' && <>
@@ -194,16 +196,16 @@ export default function PanelInvestigacion({ pagina, opciones, alElegirCaso }) {
     </>}
     {error && <p className="error" role="alert">{error}</p>}
     {pagina === 'campanas' && <>
-    <details className="panel-campana"><summary><strong>Preparar otra campaña</strong></summary>
+    <details className="panel-campana" open><summary><strong>Preparar una campaña</strong></summary>
     <div className="titulo-seccion"><span className="numero">01</span><div><h2>Campaña de generación</h2><p>Prepara una nueva matriz independiente.</p></div></div>
-    <div><div className="campos"><div><label htmlFor="nombre-campana">NOMBRE</label><input id="nombre-campana" value={nombre} onChange={(evento) => cambiarNombre(evento.target.value)} /></div><div><label htmlFor="tipo-campana">TIPO</label><select id="tipo-campana" value={tipo} onChange={(evento) => elegirTipo(evento.target.value)}><option value="lote-45">Lote completo · 45 prompts · 5 modelos</option><option value="piloto">Piloto parcial</option><option value="principal">Principal · 60 casos</option></select></div></div>
-      {tipo === 'lote-45' && <p className="nota-campana">45 × 2 estrategias × 3 motores × 5 modelos = <strong>1.350 ejecuciones</strong>, hasta 4.050 intentos del benchmark. Las recuperaciones operativas pueden repetir llamadas cuya respuesta se perdió. Se procesan una por una: 45 Open-loop y 45 Closed-loop por motor y modelo. El PDF propone 50–100 prompts; este protocolo registra explícitamente los 45 solicitados.</p>}
+    <div><div className="campos"><div><label htmlFor="nombre-campana">NOMBRE</label><input id="nombre-campana" value={nombre} onChange={(evento) => cambiarNombre(evento.target.value)} /></div><div><label htmlFor="tipo-campana">TIPO</label><select id="tipo-campana" value={tipo} onChange={(evento) => elegirTipo(evento.target.value)}><option value="seleccion">Selección manual de prompts, modelos y librerías</option><option value="lote-45">Estudio aprobado · 45 prompts · 5 modelos</option><option value="piloto">Piloto parcial</option><option value="principal">Histórico · 60 casos</option></select></div></div>
+      {tipo === 'lote-45' && <p className="nota-campana">45 × 2 estrategias × 3 motores × 5 modelos = <strong>1.350 ejecuciones</strong>, hasta 4.050 intentos del benchmark. Las recuperaciones operativas pueden repetir llamadas cuya respuesta se perdió. Se procesan una por una: 45 Open-loop y 45 Closed-loop por motor y modelo. El estudio utiliza los 45 prompts aprobados por la dirección de la investigación. El conjunto histórico de 60 se conserva por separado.</p>}
       {tipo === 'lote-45' && conjunto?.finalidad !== 'evaluacion_local_45' && <p className="error">Importa o selecciona el conjunto de 45 prompts para este lote.</p>}
       <label className="opcion-check"><input type="checkbox" checked={usarReferencias} onChange={(e) => cambiarUsarReferencias(e.target.checked)} />Calcular IoU con los STEP independientes adjuntos. Solo evaluación; nunca se envían al modelo.</label>
-      <div className="matriz-opciones"><Alternador titulo="Modelos IA" valores={Object.keys(opciones?.modelos || {})} seleccionados={modelos} cambiar={cambiarModelos} etiquetas={opciones?.modelos} deshabilitado={tipo === 'lote-45'} /><Alternador titulo="Motores CAD" valores={motoresBase} seleccionados={motores} cambiar={cambiarMotores} etiquetas={opciones?.motores} deshabilitado={tipo === 'lote-45'} /><Alternador titulo="Estrategias" valores={modosBase} seleccionados={modos} cambiar={cambiarModos} etiquetas={opciones?.modos} deshabilitado={tipo === 'lote-45'} /></div>
-      {tipo === 'piloto' && <div className="seleccion-casos"><label>CASOS DEL PILOTO · {casosElegidos.length} SELECCIONADOS</label><div>{conjunto?.casos.map((caso) => <label key={caso.codigo} className="opcion-check"><input type="checkbox" checked={casosElegidos.includes(caso.codigo)} onChange={() => cambiarCasosElegidos(casosElegidos.includes(caso.codigo) ? casosElegidos.filter((codigo) => codigo !== caso.codigo) : [...casosElegidos, caso.codigo])} />{caso.codigo}</label>)}</div></div>}
+      <p>Los modelos se detectan al abrir la aplicación. Si acabas de instalar otro, vuelve a abrirla para actualizar la lista.</p>{opciones && !Object.keys(opciones.modelos || {}).length && <p className="error">No hay modelos disponibles. Abre Ollama y vuelve a abrir la aplicación.</p>}<div className="matriz-opciones"><Alternador titulo="Modelos IA" valores={Object.keys(opciones?.modelos || {})} seleccionados={modelos} cambiar={cambiarModelos} etiquetas={opciones?.modelos} deshabilitado={tipo === 'lote-45'} /><Alternador titulo="Librerías / motores CAD" valores={motoresBase} seleccionados={motores} cambiar={cambiarMotores} etiquetas={opciones?.motores} deshabilitado={tipo === 'lote-45'} /><Alternador titulo="Estrategias" valores={modosBase} seleccionados={modos} cambiar={cambiarModos} etiquetas={opciones?.modos} deshabilitado={tipo === 'lote-45'} /></div>
+      {['piloto', 'seleccion'].includes(tipo) && <div className="seleccion-casos"><label>PROMPTS · {casosElegidos.filter((codigo) => conjunto?.casos.some((caso) => caso.codigo === codigo)).length} SELECCIONADOS</label><div className="acciones"><button type="button" onClick={() => cambiarCasosElegidos(conjunto?.casos.map((caso) => caso.codigo) || [])}>Seleccionar los {conjunto?.total || 0} prompts</button><button type="button" onClick={() => cambiarCasosElegidos([])}>Quitar selección</button></div><div>{conjunto?.casos.map((caso) => <label key={caso.codigo} className="opcion-check"><input type="checkbox" checked={casosElegidos.includes(caso.codigo)} onChange={() => cambiarCasosElegidos(casosElegidos.includes(caso.codigo) ? casosElegidos.filter((codigo) => codigo !== caso.codigo) : [...casosElegidos, caso.codigo])} />{caso.codigo}</label>)}</div></div>}
       <div className="campos"><div><label htmlFor="repeticiones">REPETICIONES</label><input type="number" id="repeticiones" disabled={tipo === 'lote-45'} min="1" max="5" value={repeticiones} onChange={(evento) => cambiarRepeticiones(evento.target.value)} /></div><div><label htmlFor="semilla">SEMILLA</label><input type="number" id="semilla" value={semilla} onChange={(evento) => cambiarSemilla(evento.target.value)} /></div></div>
-      <div className="acciones"><button type="button" disabled={ocupado || !conjunto || !modelos.length || !motores.length || !modos.length || (tipo === 'lote-45' && conjunto.finalidad !== 'evaluacion_local_45')} onClick={() => ejecutarAccion('/api/campanas/previsualizar', solicitud(), cambiarVista)}>Calcular matriz</button><button type="button" disabled={ocupado || !vista} onClick={() => ejecutarAccion('/api/campanas', solicitud(), (datos) => { cambiarCampanaActual(datos.identificador); cambiarVista(null); recargar(); })}>Guardar campaña</button></div>
+      <div className="acciones"><button type="button" disabled={ocupado || !conjunto || !modelos.length || !motores.length || !modos.length || (['seleccion', 'piloto'].includes(tipo) && !casosElegidos.length) || (tipo === 'lote-45' && conjunto.finalidad !== 'evaluacion_local_45')} onClick={() => ejecutarAccion('/api/campanas/previsualizar', solicitud(), cambiarVista)}>Calcular matriz</button><button type="button" disabled={ocupado || !vista} onClick={() => ejecutarAccion('/api/campanas', solicitud(), (datos) => { cambiarCampanaActual(datos.identificador); cambiarVista(null); recargar(); })}>Guardar campaña</button></div>
       {vista && <div className="vista-previa"><strong>{vista.ejecuciones} ejecuciones · hasta {vista.maximo_generaciones} generaciones</strong><span>{vista.ejecuciones_por_modelo} ejecuciones por modelo · cola secuencial · sin cargo de API</span><small>La duración depende del hardware y del modelo. No se estima el coste de electricidad.</small></div>}
     </div></details>
 
@@ -211,9 +213,9 @@ export default function PanelInvestigacion({ pagina, opciones, alElegirCaso }) {
     {pagina !== 'casos' && <>
     <div className="titulo-seccion"><span className="numero">{pagina === 'campanas' ? '02' : '01'}</span><div><h2>{pagina === 'campanas' ? 'Seguimiento de campaña' : 'Resultados digitales'}</h2><p>{pagina === 'campanas' ? 'Selecciona una campaña guardada para iniciarla o seguir su progreso.' : 'Métricas con denominadores y exportaciones.'}</p></div></div>
     <div className="panel-resultados"><label htmlFor="campana-elegida">CAMPAÑA</label><select id="campana-elegida" value={campanaActual} onChange={(evento) => cambiarCampanaActual(evento.target.value)}><option value="">Selecciona una campaña</option>{campanas.map((dato) => <option key={dato.identificador} value={dato.identificador}>{dato.nombre} · {dato.estado}</option>)}</select>
-      {resumen && <><div className="resumen-dataset"><div><small>ESTADO</small><strong>{resumen.estado}</strong></div><div><small>PROGRESO CIENTÍFICO</small><strong>{completadas} / {resumen.total_ejecuciones}</strong></div><div><small>BLOQUEADAS</small><strong>{estados.bloqueada || 0}</strong></div><div><small>INFERENCIA LOCAL</small><strong>Sin tarifa por API</strong></div></div><p className="nota-campana">{resumen.mensaje}</p>{resumen.ejecucion_actual && <p className="nota-campana"><strong>En curso:</strong> {resumen.ejecucion_actual.modelo} · {resumen.ejecucion_actual.motor} · {resumen.ejecucion_actual.modo} · {resumen.ejecucion_actual.caso} · intento {resumen.ejecucion_actual.intento}. <a href={`#/resultado/${resumen.ejecucion_actual.identificador}`}>Ver ejecución →</a></p>}<div className="acciones">{pagina === 'campanas' && ['borrador', 'pausada'].includes(resumen.estado) && <button type="button" disabled={ocupado} onClick={() => controlar('iniciar')}>Iniciar campaña</button>}{pagina === 'campanas' && resumen.estado === 'en_curso' && <button type="button" disabled={ocupado} onClick={() => controlar('pausar')}>Pausar</button>}{pagina === 'campanas' && ['borrador', 'pausada', 'en_curso', 'bloqueada'].includes(resumen.estado) && <button type="button" disabled={ocupado} onClick={() => controlar('cancelar')}>Cancelar pendientes</button>}</div><div className="enlaces">{pagina === 'campanas' && <a href="#/metricas">Ver métricas →</a>}<a href={`/api/campanas/${campanaActual}/metricas.csv`}>Métricas CSV ↓</a><a href={`/api/campanas/${campanaActual}/datos.json`}>Datos y trazas JSON ↓</a><a href={`/api/campanas/${campanaActual}/tabla-digital.csv`}>Tabla Digital Metrics CSV ↓</a><a href={`/api/campanas/${campanaActual}/entregables.zip`}>Todos los entregables ZIP ↓</a></div></>}
-      {pagina === 'campanas' && resumen?.estado === 'bloqueada' && !resumen.configuracion?.automatico && <div className="acciones"><button type="button" disabled={ocupado} onClick={() => controlar('iniciar')}>Continuar ejecuciones pendientes</button><small>Las ejecuciones bloqueadas conservan su estado y quedan fuera de las tasas finales.</small></div>}
-      {pagina === 'metricas' && metricas && <><div className="referencia-panel"><h3>Figura · Compile Rate por iteración</h3><label htmlFor="nivel-figura">DIFICULTAD</label><select id="nivel-figura" value={nivelFigura} onChange={(e) => cambiarNivelFigura(e.target.value)}><option value="todos">Todos los prompts</option><option value="basico">Básico</option><option value="intermedio">Intermedio</option><option value="complejo">Complejo</option></select><div className="enlaces"><a href={`/api/campanas/${campanaActual}/figura.svg?nivel=${nivelFigura}`}>Figura SVG ↓</a><a href={`/api/campanas/${campanaActual}/figura.png?nivel=${nivelFigura}`}>Figura PNG ↓</a></div><p>La tabla Digital Metrics incluye IR de código, IR de CAD e IoU con denominadores. Las filas de literatura llevan fuente y se marcan como contexto: sus datasets y dificultades no son equivalentes a este lote.</p></div><p className="nota-campana">{metricas.final ? 'Cohorte final' : 'Resultados provisionales: hay ejecuciones pendientes o no evaluables.'} Compile Rate indica código que se ejecutó; IR-CAD indica falta de CAD exportable. Las celdas sin denominador aparecen como —.</p><div className="acciones"><button type="button" onClick={() => cambiarTipoGrafico('codigo')} className={tipoGrafico === 'codigo' ? 'activo' : ''}>Éxito de código</button><button type="button" onClick={() => cambiarTipoGrafico('cad')} className={tipoGrafico === 'cad' ? 'activo' : ''}>Éxito CAD</button></div><div className="tabla-contenedor"><table><thead><tr><th>Modelo / motor / nivel / modo</th><th>N evaluable / planificado</th><th>Éxitos por intento</th><th>Compile Rate</th><th>IR código / CAD</th><th>STL watertight</th><th>IoU / Chamfer</th></tr></thead><tbody>{filas.map((fila) => <tr key={`${fila.modelo}-${fila.motor}-${fila.modo}-${fila.nivel}`}><td><strong>{fila.modelo}</strong><br />{fila.motor} · {fila.nivel} · {fila.modo}</td><td>{fila.n_evaluable} / {fila.n_planificado}</td><td><BarraIteraciones fila={fila} tipo={tipoGrafico} /><small>{(tipoGrafico === 'codigo' ? fila.primer_exito_ejecucion : fila.primer_exito_cad_exportable).join(' / ')} · sin éxito {tipoGrafico === 'codigo' ? fila.sin_exito_ejecucion : fila.sin_cad_exportable}</small></td><td>{fila.compile_rate_acumulado_pct.at(-1) ?? '—'} %</td><td>{fila.ir_codigo_pct ?? '—'} / {fila.ir_cad_pct ?? '—'} %</td><td>{fila.topologia.n_watertight} / {fila.topologia.n_stl_analizado}</td><td>{fila.referencias.n_iou ? `${fila.referencias.iou_brep_medio} / ${fila.referencias.chamfer_digital_mm2_medio} mm²` : 'Sin referencia'}</td></tr>)}</tbody></table></div><div className="leyenda">Intentos 1–5: verde, azul, violeta, lila y ámbar · gris: sin éxito. Open-loop conserva únicamente el intento 1.</div></>}
+      {resumen && <><div className="resumen-dataset"><div><small>ESTADO</small><strong>{resumen.estado}</strong></div><div><small>PROGRESO CIENTÍFICO</small><strong>{completadas} / {resumen.total_ejecuciones}</strong></div><div><small>BLOQUEADAS</small><strong>{estados.bloqueada || 0}</strong></div><div><small>INFERENCIA LOCAL</small><strong>Sin tarifa por API</strong></div></div><p className="nota-campana">{resumen.mensaje}</p>{resumen.ejecucion_actual && <p className="nota-campana"><strong>En curso:</strong> {resumen.ejecucion_actual.modelo} · {resumen.ejecucion_actual.motor} · {resumen.ejecucion_actual.modo} · {resumen.ejecucion_actual.caso} · intento {resumen.ejecucion_actual.intento}. <a href={`#/resultado/${resumen.ejecucion_actual.identificador}`}>Ver ejecución →</a></p>}<div className="acciones">{pagina === 'campanas' && ['borrador', 'pausada'].includes(resumen.estado) && <button type="button" disabled={ocupado} onClick={() => controlar('iniciar')}>Iniciar campaña</button>}{pagina === 'campanas' && resumen.estado === 'en_curso' && <button type="button" disabled={ocupado} onClick={() => controlar('pausar')}>Pausar</button>}{pagina === 'campanas' && ['borrador', 'pausada', 'en_curso', 'bloqueada'].includes(resumen.estado) && <button type="button" disabled={ocupado} onClick={() => controlar('cancelar')}>Cancelar pendientes</button>}<button type="button" disabled={ocupado} onClick={() => ejecutarAccion(`/api/campanas/${campanaActual}/actualizar-entregables`, {}, () => cambiarAvisoExportacion('Archivos locales actualizados a partir de los resultados guardados.'))}>Actualizar archivos locales</button></div>{avisoExportacion && <p className="nota-campana" role="status">{avisoExportacion}</p>}<div className="enlaces">{pagina === 'campanas' && <a href="#/metricas">Ver métricas →</a>}<a href={`/api/campanas/${campanaActual}/metricas.csv`}>Métricas CSV ↓</a><a href={`/api/campanas/${campanaActual}/datos.json`}>Datos y trazas JSON ↓</a><a href={`/api/campanas/${campanaActual}/manufacturabilidad.csv`}>Manufacturabilidad CSV ↓</a><a href={`/api/campanas/${campanaActual}/entregables-fisicos.zip`}>Metrología, fotos y mapas ZIP ↓</a><a href={`/api/campanas/${campanaActual}/tabla-digital.csv`}>Tabla Digital Metrics CSV ↓</a><a href={`/api/campanas/${campanaActual}/entregables.zip`}>Todos los entregables ZIP ↓</a></div></>}
+      {pagina === 'campanas' && resumen?.estado === 'bloqueada' && <div className="acciones"><button type="button" disabled={ocupado} onClick={() => controlar('iniciar')}>Continuar ejecuciones pendientes</button><small>Las ejecuciones bloqueadas conservan su estado y quedan fuera de las tasas finales.</small></div>}
+      {pagina === 'metricas' && metricas && <><ComparativaExterna key={campanaActual} campana={campanaActual} alImportar={async () => cambiarMetricas(await pedir(`/api/campanas/${campanaActual}/metricas`))} /><div className="referencia-panel"><h3>Figura · Compile Rate por iteración</h3><label htmlFor="nivel-figura">DIFICULTAD</label><select id="nivel-figura" value={nivelFigura} onChange={(e) => cambiarNivelFigura(e.target.value)}><option value="todos">Todos los prompts</option><option value="basico">Básico</option><option value="intermedio">Intermedio</option><option value="complejo">Complejo</option></select><div className="enlaces"><a href={`/api/campanas/${campanaActual}/figura.svg?nivel=${nivelFigura}`}>Figura SVG ↓</a><a href={`/api/campanas/${campanaActual}/figura.png?nivel=${nivelFigura}`}>Figura PNG ↓</a></div><p>La tabla Digital Metrics incluye IR de código, IR de CAD e IoU con denominadores. Las filas de literatura llevan fuente y se marcan como contexto: sus datasets y dificultades no son equivalentes a este lote.</p></div><p className="nota-campana">{metricas.final ? 'Cohorte final' : 'Resultados provisionales: hay ejecuciones pendientes o no evaluables.'} Compile Rate indica código que se ejecutó; IR-CAD indica falta de CAD exportable. Las celdas sin denominador aparecen como —.</p><div className="acciones"><button type="button" onClick={() => cambiarTipoGrafico('codigo')} className={tipoGrafico === 'codigo' ? 'activo' : ''}>Éxito de código</button><button type="button" onClick={() => cambiarTipoGrafico('cad')} className={tipoGrafico === 'cad' ? 'activo' : ''}>Éxito CAD</button></div><div className="tabla-contenedor"><table><thead><tr><th>Modelo / motor / nivel / modo</th><th>N evaluable / planificado</th><th>Éxitos por intento</th><th>Compile Rate</th><th>IR código / CAD</th><th>STL watertight</th><th>IoU / Chamfer</th></tr></thead><tbody>{filas.map((fila) => <tr key={`${fila.modelo}-${fila.motor}-${fila.modo}-${fila.nivel}`}><td><strong>{fila.modelo}</strong><br />{fila.motor} · {fila.nivel} · {fila.modo}</td><td>{fila.n_evaluable} / {fila.n_planificado}</td><td><BarraIteraciones fila={fila} tipo={tipoGrafico} /><small>{(tipoGrafico === 'codigo' ? fila.primer_exito_ejecucion : fila.primer_exito_cad_exportable).join(' / ')} · sin éxito {tipoGrafico === 'codigo' ? fila.sin_exito_ejecucion : fila.sin_cad_exportable}</small></td><td>{fila.compile_rate_acumulado_pct.at(-1) ?? '—'} %</td><td>{fila.ir_codigo_pct ?? '—'} / {fila.ir_cad_pct ?? '—'} %</td><td>{fila.topologia.n_watertight} / {fila.topologia.n_stl_analizado}</td><td>{fila.referencias.n_iou ? `${fila.referencias.iou_brep_medio} / ${fila.referencias.chamfer_digital_mm2_medio} mm²` : 'Sin referencia'}</td></tr>)}</tbody></table></div><div className="leyenda">Intentos 1–5: verde, azul, violeta, lila y ámbar · gris: sin éxito. Open-loop conserva únicamente el intento 1.</div></>}
       {pagina === 'metricas' && metricas?.comparaciones_motores?.length > 0 && <div className="tabla-contenedor"><table><thead><tr><th>Comparación pareada frente a CadQuery</th><th>Casos comunes evaluables</th><th>Δ Compile Rate</th><th>Δ éxito CAD</th></tr></thead><tbody>{metricas.comparaciones_motores.map((fila) => <tr key={`${fila.modelo}-${fila.motor_comparado}-${fila.modo}-${fila.nivel}`}><td>{fila.modelo} · {fila.motor_comparado} · {fila.modo} · {fila.nivel}</td><td>{fila.n_pares_evaluables}</td><td>{fila.delta_compile_pct ?? '—'} %</td><td>{fila.delta_exito_cad_pct ?? '—'} %</td></tr>)}</tbody></table></div>}
       {!campanaActual && <p className="nota-campana">{campanas.length ? 'Elige una campaña para consultar su información.' : 'Todavía no hay campañas guardadas.'} {pagina === 'metricas' && <a href="#/campanas">Preparar una campaña →</a>}</p>}
     </div>

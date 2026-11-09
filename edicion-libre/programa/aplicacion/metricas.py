@@ -183,7 +183,9 @@ def calcular_metricas_campana(identificador: str) -> dict:
                     for b, e in pares
                 ) / n_pares, 4) if n_pares else None,
             })
+        from aplicacion.comparativa import filas_externas
         return {
+            "referencias_externas": filas_externas(sesion, campana),
             "campana_identificador": identificador, "nombre": campana.nombre,
             "estado": campana.estado,
             "final": bool(filas) and all(fila["final"] for fila in filas),

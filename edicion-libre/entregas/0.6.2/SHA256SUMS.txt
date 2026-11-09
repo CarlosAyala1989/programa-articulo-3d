@@ -1,0 +1,3 @@
+cdd852bd56afe8ab852289b8789629f92bb81d14fed8d700c774fd1db8daa14f  Agente-Ciel-Nativo-0.6.2-Setup.exe
+3db96a9fca6bcd45d6e26f86f1f9beb2f41bdf325a636131661436ec6bc14d34  programa.zip
+1ffe941b928a03f4c1833ef6e63851dd24f3227d1f943a742f37306b880b15dc  paquete.json

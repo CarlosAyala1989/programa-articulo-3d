@@ -210,6 +210,9 @@ def procesar_ejecucion(identificador: str) -> None:
         automatico = bool(campana and (campana.configuracion or {}).get("automatico"))
     if not automatico:
         _procesar_ejecucion(identificador)
+        if MODO_NATIVO and campana:
+            from aplicacion.archivado import guardar_ejecucion
+            guardar_ejecucion(identificador)
         return
     from aplicacion.archivado import guardar_ejecucion
     try:
@@ -284,6 +287,7 @@ def _procesar_ejecucion(identificador: str) -> None:
         texto_sistema = (condicion.configuracion or {}).get("sistema") if condicion else None
         texto_sistema = texto_sistema or instrucciones_sistema(motor)
         recuperar_identificador = recuperar.identificador if recuperar else None
+        contexto_variante = ejecucion.contexto_variante
         historial = [{
             "numero": intento.numero, "codigo": intento.codigo,
             "diagnostico": intento.diagnostico, "fase_error": intento.fase_error,
@@ -313,12 +317,15 @@ def _procesar_ejecucion(identificador: str) -> None:
             identificador_intento = intento.identificador
 
         solicitud, retroalimentacion = construir_solicitud(descripcion, motor, historial)
+        if contexto_variante:
+            from aplicacion.biblioteca import solicitud_variante
+            solicitud = solicitud_variante(contexto_variante) + "\n\n" + solicitud
         mensajes = [
             {"role": "system", "content": texto_sistema},
             {"role": "user", "content": solicitud},
         ]
         solicitud_registrada = {
-            "mensajes": mensajes, "plantilla": VERSION_PLANTILLA,
+            "mensajes": mensajes, "plantilla": "ciel-variantes-v1" if contexto_variante else VERSION_PLANTILLA,
             "retroalimentacion": retroalimentacion,
             "perfil": perfil_generacion(modelo, esfuerzo, maximo_tokens),
             **({"recuperaciones_operativas": recuperaciones} if recuperar_identificador and numero == siguiente_intento else {}),
@@ -532,6 +539,12 @@ def _procesar_ejecucion(identificador: str) -> None:
                 sesion.commit()
                 if ejecucion.estado == "completada":
                     from aplicacion.analisis import analizar_ejecucion, registrar_incidencia
+                    try:
+                        from aplicacion.biblioteca import generar_vistas
+                        generar_vistas(identificador)
+                    except Exception:
+                        import logging
+                        logging.getLogger(__name__).exception("No se pudieron generar las vistas")
                     try:
                         analizar_ejecucion(identificador)
                     except Exception as error:

@@ -1,0 +1,3 @@
+DejaVu Sans, distribución fonts-dejavu-core de Debian. Archivo sin modificar.
+Fuente: https://dejavu-fonts.github.io/
+Uso: caracteres españoles y unidades en figuras científicas exportadas, sin depender de fuentes instaladas en Windows.

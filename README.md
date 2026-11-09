@@ -15,7 +15,16 @@
 
 ## Programa libre para Windows
 
-La [edición libre](edicion-libre/README.md) se conserva por separado en `edicion-libre/`, con [su propio historial de versiones](edicion-libre/CHANGELOG.md) y etiquetas `libre-v<versión>`. Incluye el [instalador nativo 0.5.0](edicion-libre/entregas/0.5.0/Agente-Ciel-Nativo-0.5.0-Setup.exe), código, instrucciones y hashes. Usa cinco modelos de Ollama y conserva el lote de 45 prompts, resultados y exportaciones. Su ejecución real debe comprobarse en Windows; la aplicación de pago de esta raíz tiene su propio despliegue.
+La carpeta **[edicion-libre/](edicion-libre/README.md) contiene todo el proyecto nativo para Windows**, incluida su interfaz web local. La versión actual es **0.8.0**: [instalador](edicion-libre/entregas/0.8.0/Agente-Ciel-Nativo-0.8.0-Setup.exe), [hashes SHA-256](edicion-libre/entregas/0.8.0/SHA256SUMS.txt), [instrucciones para Windows](edicion-libre/nativo/README.md) e [historial de versiones](edicion-libre/CHANGELOG.md).
+
+- `edicion-libre/programa/`: código de la aplicación, evaluación, motores CAD, datos y arranque nativo.
+- `edicion-libre/programa/interfaz/`: código React/Three.js de la interfaz web del programa nativo.
+- `edicion-libre/nativo/`: preparación de Windows, dependencias fijadas y configuración del instalador.
+- `edicion-libre/entregas/0.8.0/`: instalador listo para usar, paquete compilado y evidencia de validación.
+
+Para trabajar desde el código, copia **toda `edicion-libre/`**, instala Node.js y sigue la sección [Ejecutar desde el código](edicion-libre/nativo/README.md#ejecutar-desde-el-código). La ejecución es nativa, con Ollama y SQLite; su interfaz se abre en `http://127.0.0.1:8020`. La actualización 0.8.0 tiene pruebas en Linux; la instalación de esta versión debe comprobarse en Windows.
+
+La aplicación web con proveedores externos está en las carpetas de esta raíz (`aplicacion/`, `interfaz/`, `supervisor/`, `motores/`, `evaluador/` y `datos/`) y se despliega con el `compose.yaml` de la raíz siguiendo el inicio rápido. Las campañas y versiones históricas se conservan por separado.
 
 ## Inicio rápido
 

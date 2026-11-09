@@ -1,0 +1,15 @@
+{
+  "version": "0.7.0",
+  "sha256_programa": "8ab5bdfcbc43df6a28dbd431b0159a389abc57ff293efa729ad772d1667d3c3c",
+  "bytes_programa": 748156,
+  "origen": {
+    "version": "ciel-nativo-windows-v2",
+    "version_instalador": "0.7.0",
+    "codigo_sha256": "2279e7aa8bea7a2fe66a53a5cb962e7e5e2134c4df2765d3c10697e69a53d790",
+    "protocolo": "ciel-campana-manual-v1",
+    "inicio": "manual; campaña, prompts, modelos y motores seleccionados por el usuario",
+    "ejecucion": "solo Windows; Ollama existente; SQLite local",
+    "metrologia": "ciel-metrologia-otter-v1; impresión manual; escaneo aportado por el usuario",
+    "validacion": "pruebas simuladas de IA/CAD y metrología con geometrías sintéticas; instalación Windows pendiente"
+  }
+}

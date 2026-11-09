@@ -1,0 +1,14 @@
+{
+  "version": "0.6.0",
+  "sha256_programa": "7bbf3afcb812c4fa8a50ecdba68d5f9b0cf219d8bf2622a205535db94853555c",
+  "bytes_programa": 334046,
+  "origen": {
+    "version": "ciel-nativo-windows-v2",
+    "version_instalador": "0.6.0",
+    "codigo_sha256": "6fe8100ec567e785978abe70e61c038b68d5cc5cc9da95da27bb8691dee2cf29",
+    "protocolo": "ciel-campana-manual-v1",
+    "inicio": "manual; campaña, prompts, modelos y motores seleccionados por el usuario",
+    "ejecucion": "solo Windows; Ollama existente; SQLite local",
+    "validacion": "inspección estática y compilación del instalador; sin ejecutar aplicación o benchmark en Ubuntu"
+  }
+}

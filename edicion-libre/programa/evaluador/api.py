@@ -533,3 +533,19 @@ def analizar(solicitud: SolicitudAnalisis) -> dict:
         return respuesta
     except ValueError as error:
         raise HTTPException(422, str(error)) from error
+
+
+@aplicacion.post('/vistas-biblioteca')
+def vistas_biblioteca(solicitud: SolicitudVerificacion) -> dict:
+    from evaluador.renderizado import renderizar_biblioteca
+    try:
+        bruto = base64.b64decode(solicitud.archivos['pieza.stl'], validate=True)
+        if len(bruto) > 20_000_000:
+            raise ValueError('STL demasiado grande')
+        with tempfile.TemporaryDirectory() as carpeta:
+            ruta = Path(carpeta) / 'pieza.stl'
+            ruta.write_bytes(bruto)
+            archivos, perfil = renderizar_biblioteca(leer_malla(ruta))
+        return {'archivos': {n: base64.b64encode(b).decode('ascii') for n, b in archivos.items()}, 'perfil': perfil}
+    except (ValueError, KeyError) as error:
+        raise HTTPException(422, 'STL ausente o inválido') from error

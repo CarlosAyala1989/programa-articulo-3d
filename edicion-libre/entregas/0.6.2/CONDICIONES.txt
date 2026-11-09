@@ -1,0 +1,15 @@
+Agente Ciel Nativo 0.6.2 - Windows x64
+
+Este instalador prepara Python, CadQuery 2.6.1, build123d 0.13.0 y FreeCAD 1.1.3 en Windows. Requiere internet para descargar estas dependencias, Windows 10 22H2 o Windows 11, al menos 16 GB de RAM y 15 GB libres adicionales a modelos y resultados.
+
+Ollama para Windows debe estar abierto para generar. Puedes seleccionar cualquiera de sus modelos instalados. Se reutilizan los modelos existentes. La inferencia se realiza localmente.
+
+Al abrir la aplicación eliges la campaña, los prompts, los modelos y los motores. Solo comienza al pulsar Iniciar campaña. Open-loop permite un intento y closed-loop hasta cinco. La vista previa muestra el número de ejecuciones antes de guardar.
+
+SQLite, CSV, códigos y geometrías se guardan en las carpetas locales indicadas en README.md. Las campañas quedan pausadas al volver a abrir el programa. El usuario puede pausar desde la interfaz o detener cerrando la consola de la aplicación.
+
+El protocolo nativo es distinto de la edición anterior: Gemma usa Q8_0 y FreeCAD 1.1.3. El código generado se revisa mediante AST y se ejecuta en procesos limitados con Job Objects de Windows. Estos límites no constituyen aislamiento de permisos de archivos ni de red.
+
+Las métricas físicas necesitan impresión, escaneo y medición reales. Las columnas pendientes permanecen vacías. IoU necesita una referencia independiente habilitada explícitamente. El conjunto de 45 prompts se mantiene como piloto.
+
+Las bibliotecas y modelos mantienen sus licencias originales. El instalador se ha compilado e inspeccionado estáticamente; esta versión no se ha ejecutado en Ubuntu y queda pendiente su comprobación en el Windows de destino.

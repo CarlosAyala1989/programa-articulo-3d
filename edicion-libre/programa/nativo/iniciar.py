@@ -21,13 +21,14 @@ def configurar(raiz: Path, resultados: Path) -> None:
     resultados.mkdir(parents=True, exist_ok=True)
     (datos / "artefactos").mkdir(exist_ok=True)
     perfiles = json.loads((programa / "datos/modelos_windows_nativos_v1.json").read_text(encoding="utf-8"))
-    os.environ.update({"CIEL_MODO_NATIVO": "1", "CIEL_AUTOMATICO": "1", "PYTHONUTF8": "1",
+    os.environ.update({"CIEL_MODO_NATIVO": "1", "CIEL_AUTOMATICO": "0", "PYTHONUTF8": "1",
         "URL_BASE_DATOS": "sqlite:///" + (datos / "ciel.sqlite").as_posix(),
         "DIRECTORIO_ARTEFACTOS": str(datos / "artefactos"), "DIRECTORIO_RESULTADOS": str(resultados),
         "CIEL_RUNTIMES_NATIVOS": str(raiz / "runtimes_nativos.json"),
         "CIEL_REGISTRO_MODELOS": str(datos / "modelos_instalados.json"),
         "CIEL_DIRECTORIO_WEB": str(programa / "interfaz/dist"),
         "URL_SUPERVISOR": "http://127.0.0.1:8021", "URL_EVALUADOR": "http://127.0.0.1:8022",
+        "URL_METROLOGIA": "http://127.0.0.1:8023",
         "URL_OLLAMA": "http://127.0.0.1:11434", "NO_PROXY": "127.0.0.1,localhost", "no_proxy": "127.0.0.1,localhost",
         "DEEPSEEK_API_KEY": "", "NVIDIA_API_KEY": "", "CLI_LOCAL_HABILITADO": "0"})
     for modelo in perfiles["modelos"]:
@@ -48,7 +49,7 @@ def esperar(url: str, proceso=None) -> dict:
 
 def main() -> None:
     if sys.platform != "win32":
-        raise SystemExit("Esta edición ejecuta las 1.350 pruebas solamente en Windows. No se inicia en Ubuntu.")
+        raise SystemExit("Esta edición nativa solamente se inicia en Windows.")
     parser = argparse.ArgumentParser()
     parser.add_argument("--raiz", type=Path, required=True)
     parser.add_argument("--resultados", type=Path, required=True)
@@ -75,18 +76,26 @@ def main() -> None:
         logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s",
             handlers=[logging.FileHandler(logs / "aplicacion.log", encoding="utf-8"), logging.StreamHandler()])
         from nativo.modelos import registrar_modelos
-        registrar_modelos(Path(__file__).resolve().parents[1], Path(os.environ["CIEL_REGISTRO_MODELOS"]))
+        inventario = registrar_modelos(Path(__file__).resolve().parents[1], Path(os.environ["CIEL_REGISTRO_MODELOS"]))
+        for aviso in inventario["avisos"]:
+            logging.warning(aviso)
         from nativo.procesos_windows import TrabajoWindows
         config = json.loads((raiz / "runtimes_nativos.json").read_text(encoding="utf-8"))
         servicios = [(str(raiz / "entornos/api/Scripts/python.exe"), "nativo.supervisor:aplicacion", 8021),
-            (config["motores"]["cadquery"]["python"], "evaluador.api:aplicacion", 8022)]
+            (config["motores"]["cadquery"]["python"], "evaluador.api:aplicacion", 8022),
+            (str(raiz / "entornos/metrologia/Scripts/python.exe"), "evaluador.servicio_metrologia:aplicacion", 8023)]
         for python, aplicacion, puerto in servicios:
             registro = (logs / f"servicio-{puerto}.log").open("ab")
             registros.append(registro)
             trabajo = TrabajoWindows()
             trabajos.append(trabajo)
+            entorno_servicio = dict(os.environ, PYTHONIOENCODING="utf-8")
+            if puerto == 8023:
+                # Evitar sobreasignar hilos BLAS en los ajustes locales pequeños.
+                # Solo afecta al entorno físico, no a los motores CAD congelados.
+                entorno_servicio.update(OPENBLAS_NUM_THREADS="1", OMP_NUM_THREADS="1")
             proceso = subprocess.Popen([python, "-m", "uvicorn", aplicacion, "--host", "127.0.0.1", "--port", str(puerto)],
-                cwd=Path(__file__).resolve().parents[1], env=dict(os.environ, PYTHONIOENCODING="utf-8"),
+                cwd=Path(__file__).resolve().parents[1], env=entorno_servicio,
                 stdout=registro, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, creationflags=subprocess.CREATE_NO_WINDOW)
             procesos.append(proceso)
             trabajo.asignar(proceso)
@@ -95,30 +104,27 @@ def main() -> None:
         from aplicacion.api import aplicacion
         from aplicacion.base_datos import crear_tablas
         crear_tablas()
-        from aplicacion.proveedores import modelos_configurados, verificar_modelo_local
-        for modelo in modelos_configurados():
-            verificar_modelo_local(modelo)
         servidor = uvicorn.Server(uvicorn.Config(aplicacion, host="127.0.0.1", port=8020, log_level="info"))
 
-        def arrancar_lote() -> None:
+        def abrir_interfaz() -> None:
             try:
                 esperar("http://127.0.0.1:8020/api/salud")
                 from aplicacion.tareas_nativas import COLA
                 from aplicacion.iniciar_trabajador import preparar_reinicio
                 COLA.iniciar()
-                preparar_reinicio(programar=True)
-                logging.info("Lote nativo: 45 prompts × 5 modelos × 3 motores × 2 modos = 1.350 ejecuciones")
+                preparar_reinicio(programar=False)
+                logging.info("Inicio manual: elige y guarda una campaña antes de iniciarla")
                 logging.info("SQLite: %s; resultados: %s", raiz / "datos/ciel.sqlite", resultados)
                 webbrowser.open("http://127.0.0.1:8020")
             except Exception as error:
                 errores_arranque.append(error)
-                logging.exception("No se pudo preparar el lote; no se iniciaron nuevas ejecuciones")
+                logging.exception("No se pudo abrir la interfaz")
                 servidor.should_exit = True
 
-        threading.Thread(target=arrancar_lote, daemon=True).start()
+        threading.Thread(target=abrir_interfaz, daemon=True).start()
         servidor.run()
         if errores_arranque:
-            raise RuntimeError(f"No se pudo iniciar el lote: {errores_arranque[0]}")
+            raise RuntimeError(f"No se pudo abrir la aplicación: {errores_arranque[0]}")
     finally:
         if servidor:
             servidor.should_exit = True
@@ -142,7 +148,7 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print("Aplicación detenida. El próximo arranque recupera el checkpoint local.")
+        print("Aplicación detenida. Las campañas quedan guardadas para continuarlas manualmente.")
     except Exception as error:
         logging.exception("Error del arranque nativo")
         texto = f"{type(error).__name__}: {error}"
@@ -150,5 +156,5 @@ if __name__ == "__main__":
             raiz = Path(os.environ.get("LOCALAPPDATA", ".")) / "AgenteCielNativo"
             raiz.mkdir(parents=True, exist_ok=True)
             (raiz / "ultimo-error.txt").write_text(texto + "\nConsulta registros/aplicacion.log", encoding="utf-8")
-            ctypes.windll.user32.MessageBoxW(None, texto + f"\n\nRegistro: {raiz / 'registros/aplicacion.log'}", "Agente Ciel Nativo 0.5.0", 0x10)
+            ctypes.windll.user32.MessageBoxW(None, texto + f"\n\nRegistro: {raiz / 'registros/aplicacion.log'}", "Agente Ciel Nativo 0.8.0", 0x10)
         raise SystemExit(1)

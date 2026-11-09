@@ -9,8 +9,8 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from aplicacion.base_datos import Campana, CasoDiseno, ComparacionDigital, Ejecucion, InformeTopologia, crear_sesion, motor_base_datos
-from aplicacion.resultados import convertir_csv
+from aplicacion.base_datos import Campana, CasoDiseno, ComparacionDigital, Ejecucion, InformeTopologia, ComparacionFisica, crear_sesion, motor_base_datos
+from aplicacion.resultados import convertir_csv, filas_manufacturabilidad
 
 
 def aplanar(datos: dict, prefijo: str = "") -> dict:
@@ -38,6 +38,9 @@ def exportar(identificador: str, carpeta: Path, metricas: dict, copia_sqlite: bo
         ids = [e.identificador for e in ejecuciones]
         topologias = {(t.ejecucion_identificador, t.rol_malla): t for t in sesion.scalars(select(InformeTopologia).where(InformeTopologia.ejecucion_identificador.in_(ids)))}
         comparaciones = {c.ejecucion_identificador: c for c in sesion.scalars(select(ComparacionDigital).where(ComparacionDigital.ejecucion_identificador.in_(ids)))}
+        mediciones_por_ejecucion = {}
+        for medicion in sesion.scalars(select(ComparacionFisica).where(ComparacionFisica.ejecucion_identificador.in_(ids)).order_by(ComparacionFisica.fecha_creacion.desc())):
+            mediciones_por_ejecucion.setdefault(medicion.ejecucion_identificador, []).append(medicion)
         for ejecucion in ejecuciones:
             caso = casos[ejecucion.caso_identificador]
             ultimo = ejecucion.intentos[-1] if ejecucion.intentos else None
@@ -65,7 +68,16 @@ def exportar(identificador: str, carpeta: Path, metricas: dict, copia_sqlite: bo
                 "fidelidad_geometrica_certificada": None,
                 "hausdorff_fisico_mm": None, "chamfer_fisico_mm2": None, "error_dimensional_fisico_mm": None,
                 "estado_metrologia_fisica": "pendiente_de_impresion_y_escaneo_reales"}
+            mediciones = mediciones_por_ejecucion.get(ejecucion.identificador, [])
+            if mediciones:
+                medicion = next((m for m in mediciones if m.estado == 'completada'), mediciones[0])
+                fisico = medicion.resultado or {}
+                fila.update({"n_comparaciones_fisicas": len(mediciones), "comparacion_fisica_resumen": medicion.identificador,
+                    "estado_metrologia_fisica": medicion.estado, "alineacion_confirmada": medicion.alineacion_confirmada,
+                    "hausdorff_fisico_mm": fisico.get("hausdorff_maximo_mm"), "chamfer_fisico_mm2": fisico.get("chamfer_fisico_mm2"),
+                    "error_dimensional_fisico_mm": fisico.get("error_dimensional", {}).get("delta_media_mm")})
             for rol in ("nativa", "comun"):
+
                 informe = topologias.get((ejecucion.identificador, rol))
                 if informe:
                     fila.update({rol + "_" + clave: getattr(informe, clave) for clave in (
@@ -102,12 +114,14 @@ def exportar(identificador: str, carpeta: Path, metricas: dict, copia_sqlite: bo
     for nombre, filas in (("ejecuciones.csv", filas_ejecuciones), ("intentos.csv", filas_intentos),
             ("geometria.csv", filas_geometria), ("metricas_detalladas.csv", [aplanar(f) for f in metricas["filas"] + metricas["resumen_condiciones"]])):
         guardar_atomico(carpeta / nombre, convertir_csv(filas, sorted({k for f in filas for k in f}) or ["ejecucion"]))
-    manufacturabilidad = []
-    for fila in metricas["filas"] + metricas["resumen_condiciones"]:
-        for rol, clave in (("nativa", "topologia"), ("comun", "topologia_comun")):
-            manufacturabilidad.append({**{k: fila[k] for k in ("modelo", "motor", "modo", "nivel", "n_planificado", "n_evaluable", "final")},
-                "rol_stl": rol, **fila[clave], "impresion_fisica_verificada": None})
-    guardar_atomico(carpeta / "manufacturabilidad.csv", convertir_csv(manufacturabilidad, sorted({k for f in manufacturabilidad for k in f})))
+    manufacturabilidad = filas_manufacturabilidad(metricas)
+    guardar_atomico(carpeta / "manufacturabilidad.csv", convertir_csv(manufacturabilidad, list(manufacturabilidad[0]) if manufacturabilidad else ["modelo"]))
+    from aplicacion.informe_fisico import filas_metrologia, COLUMNAS
+    from aplicacion.metrologia import serializar
+    with crear_sesion() as sesion:
+        fisicas = [serializar(r) for r in sesion.scalars(select(ComparacionFisica).where(
+            ComparacionFisica.ejecucion_identificador.in_(ids)))]
+    guardar_atomico(carpeta / "tabla_metrologica.csv", convertir_csv(filas_metrologia(fisicas), COLUMNAS))
     plantilla = carpeta / "mediciones_fisicas.csv"
     if not plantilla.exists():
         columnas = ["ejecucion", "caso", "modelo", "motor", "modo", "pieza_impresa", "foto_pieza", "escaneo_pcd_ply", "alineacion_icp",
@@ -115,15 +129,16 @@ def exportar(identificador: str, carpeta: Path, metricas: dict, copia_sqlite: bo
             "delta_media_mm", "delta_desviacion_estandar_mm", "mapa_calor", "calibracion_escaner", "estado"]
         pendientes = [{**{k: f[k] for k in ("ejecucion", "caso", "modelo", "motor", "modo")}, "estado": "no_medido"} for f in filas_ejecuciones]
         guardar_atomico(plantilla, convertir_csv(pendientes, columnas))
-    registro_modelos = Path(os.environ["CIEL_REGISTRO_MODELOS"])
-    guardar_atomico(carpeta / "protocolo/modelos_windows_instalados.json", registro_modelos.read_bytes())
-    guardar_atomico(carpeta / "protocolo/runtimes_nativos.json", Path(os.environ["CIEL_RUNTIMES_NATIVOS"]).read_bytes())
+    for variable, nombre in (("CIEL_REGISTRO_MODELOS", "modelos_windows_instalados.json"), ("CIEL_RUNTIMES_NATIVOS", "runtimes_nativos.json")):
+        ruta = Path(os.environ[variable]) if os.environ.get(variable) else None
+        if ruta and ruta.is_file():
+            guardar_atomico(carpeta / "protocolo" / nombre, ruta.read_bytes())
     completadas = sum(e.estado in {"completada", "fallida"} for e in ejecuciones)
     contador_copia = carpeta / "sqlite_checkpoint.json"
     checkpoint = json.loads(contador_copia.read_text(encoding="utf-8")) if contador_copia.is_file() else {}
     ultimo = checkpoint.get("terminadas", -1)
     cierre = campana.estado == "completada" and checkpoint.get("estado") != "completada"
-    if copia_sqlite or cierre or (completadas > 0 and completadas % 50 == 0 and completadas != ultimo):
+    if motor_base_datos.url.database not in {None, ":memory:"} and (copia_sqlite or cierre or (completadas > 0 and completadas % 50 == 0 and completadas != ultimo)):
         temporal = carpeta / "resultados.sqlite.tmp"
         with sqlite3.connect(str(motor_base_datos.url.database), timeout=60) as origen, sqlite3.connect(temporal) as destino:
             origen.backup(destino, pages=256, sleep=0.05)
@@ -132,10 +147,9 @@ def exportar(identificador: str, carpeta: Path, metricas: dict, copia_sqlite: bo
             "origen": motor_base_datos.url.database})
     guardar_json(carpeta / "alcance_metricas.json", {"protocolo": (campana.configuracion or {}).get("protocolo_campana"),
         "perfiles_generacion": (campana.configuracion or {}).get("perfiles_generacion"),
-        "sqlite_activo": motor_base_datos.url.database, "n_prompts": 45, "n_ejecuciones": 1350,
-        "gemma": "Q8_0 instalada por el usuario; no corresponde al perfil Q5_K_M anterior",
+        "sqlite_activo": motor_base_datos.url.database, "n_prompts": len({e.caso_identificador for e in ejecuciones}), "n_ejecuciones": len(ejecuciones),
         "iou": "solo con STEP independiente y usar_referencias activado",
         "topologia": "DangEL y watertight digitales; no certifican una impresión física",
-        "metrologia": "columnas y plantilla pendientes; requieren piezas impresas, escaneo y medidas reales",
+        "metrologia": "ciel-metrologia-otter-v1/v2 según cada comparación; mediciones anexas, alineación rígida y confirmación del usuario",
         "comparacion_literatura": "no pareada; conjuntos y categorías de dificultad diferentes",
-        "tamano_dataset_pdf": "45 casos piloto por solicitud; el PDF propone 50 a 100"})
+        "tamano_dataset_pdf": "El PDF propone 50 a 100; consultar n_prompts de esta campaña"})

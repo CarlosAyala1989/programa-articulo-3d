@@ -145,3 +145,26 @@ def comparar_siluetas(malla_a, malla_b, orientacion_frente: str = "+Y") -> dict:
             "por_vista": por_vista, "unidad": "ratio", "muestras": 4,
             "semilla": None, "algoritmo": "IoU binario raster ortográfico 256x256, FRONT/LEFT/TOP/ISO_A",
             "perfil": PERFIL_RENDER["version"], "orientacion_frente": orientacion_frente}
+
+
+def renderizar_biblioteca(malla) -> tuple[dict[str, bytes], dict]:
+    """Perfil independiente; no modifica las láminas científicas históricas."""
+    if not len(malla.faces) or not np.isfinite(malla.vertices).all():
+        raise ValueError("No se puede renderizar un STL vacío o no finito")
+    nombres = ('frontal', 'posterior', 'izquierda', 'derecha', 'superior', 'inferior', 'isometrica')
+    imagenes = {}
+    lamina = Image.new('RGB', (1536, 1536), tuple(PERFIL_RENDER['fondo_rgb']))
+    for indice, (nombre, vista) in enumerate(zip(nombres, vistas_para_frente('+Y')[:7])):
+        imagen = _renderizar_vista(malla, vista[0], ancho=512, alto=512)
+        lamina.paste(imagen, ((indice % 3) * 512, (indice // 3) * 512))
+        imagenes['vista-' + nombre + '.png'] = imagen
+    imagenes['vista-lamina.png'] = lamina
+    imagenes['vista-miniatura.png'] = imagenes['vista-isometrica.png'].resize((256, 256))
+    archivos = {}
+    for nombre, imagen in imagenes.items():
+        salida = io.BytesIO()
+        imagen.save(salida, format='PNG')
+        archivos[nombre] = salida.getvalue()
+    return archivos, {**PERFIL_RENDER, 'version': 'ciel-biblioteca-render-v1',
+                       'orientacion_frente': '+Y', 'resolucion_vista': [512, 512],
+                       'resolucion_lamina': [1536, 1536]}

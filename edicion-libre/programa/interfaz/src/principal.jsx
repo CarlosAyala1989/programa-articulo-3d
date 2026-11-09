@@ -5,6 +5,7 @@ import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import { TrackballControls } from 'three/addons/controls/TrackballControls.js';
 import { toCreasedNormals } from 'three/addons/utils/BufferGeometryUtils.js';
 import PanelInvestigacion from './campanas.jsx';
+import { Historial, AccionesTrabajo } from './biblioteca.jsx';
 import './estilos.css';
 
 const nombresMotor = {
@@ -19,6 +20,7 @@ function OpcionesModelos({ modelos }) {
 }
 
 const paginas = {
+  historial: ['Historial', 'Abre, exporta y continúa tus trabajos anteriores.'],
   generar: ['Generar pieza', 'Describe la geometría y elige cómo construirla.'],
   resultado: ['Resultado 3D', 'Revisa el modelo, los intentos y los archivos de tu ejecución.'],
   casos: ['Prompts', 'Importa tus 45 prompts o explora los conjuntos y sus referencias digitales.'],
@@ -247,7 +249,7 @@ function Aplicacion() {
   return <main className="pagina">
     <header className="cabecera">
       <div className="marca"><span className="marca-icono">C</span><div><strong>AGENTE CIEL LIBRE</strong><small>MODELOS LOCALES · SIN API DE PAGO</small></div></div>
-      <div className="cabecera-derecha"><span className="identidad-estudio"><span className="punto" /> Estudio digital <span className="version">v0.2</span></span><div className="selector-tema" role="group" aria-label="Tema de la interfaz"><button type="button" aria-pressed={tema === 'claro'} onClick={() => cambiarTema('claro')}><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4" /><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5" /></svg>Claro</button><button type="button" aria-pressed={tema === 'oscuro'} onClick={() => cambiarTema('oscuro')}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 14A8.5 8.5 0 0 1 10 3.5 8.5 8.5 0 1 0 20.5 14Z" /></svg>Oscuro</button></div></div>
+      <div className="cabecera-derecha"><span className="identidad-estudio"><span className="punto" /> Estudio digital <span className="version">v0.8.0</span></span><div className="selector-tema" role="group" aria-label="Tema de la interfaz"><button type="button" aria-pressed={tema === 'claro'} onClick={() => cambiarTema('claro')}><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4" /><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5" /></svg>Claro</button><button type="button" aria-pressed={tema === 'oscuro'} onClick={() => cambiarTema('oscuro')}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 14A8.5 8.5 0 0 1 10 3.5 8.5 8.5 0 1 0 20.5 14Z" /></svg>Oscuro</button></div></div>
     </header>
 
     <nav className="navegacion" aria-label="Páginas del estudio">{Object.entries(paginas).map(([clave, [titulo]]) => <a key={clave}
@@ -255,6 +257,7 @@ function Aplicacion() {
       aria-current={ruta.pagina === clave ? 'page' : undefined}>{titulo}</a>)}</nav>
     <section className="encabezado-pagina"><p className="ceja">ESTUDIO CAD DIGITAL</p><h1>{paginas[ruta.pagina][0]}</h1><p>{paginas[ruta.pagina][1]}</p></section>
 
+    {ruta.pagina === 'historial' && <Historial />}
     {ruta.pagina === 'generar' && <div className="pagina-generacion">
       <section className="tarjeta formulario">
         <div className="titulo-seccion"><span className="numero">01</span><div><h2>Nueva generación</h2><p>Define la pieza y el entorno de construcción.</p></div></div>
@@ -270,7 +273,7 @@ function Aplicacion() {
           <button className="boton" disabled={enviando || !modelo || descripcion.trim().length < 12}>{enviando ? 'Iniciando…' : 'Generar pieza 3D'} <span>↗</span></button>
         </form>
       </section>
-      <aside className="guia-generacion"><h2>Tu pieza, paso a paso</h2><ol><li>Describe las dimensiones, curvas y detalles que necesitas.</li><li>Elige uno de los cinco modelos locales instalados. No requiere cuentas ni claves de API.</li><li>Selecciona el motor CAD y la estrategia de generación.</li></ol><p>El resultado se abrirá en su propia página con el visor 360°, los archivos y el diagnóstico de cada intento.</p><a href="#/casos">Explorar e importar prompts →</a>{identificador && <a href={`#/resultado/${identificador}`}>Ver la última ejecución →</a>}</aside>
+      <aside className="guia-generacion"><h2>Tu pieza, paso a paso</h2><ol><li>Describe las dimensiones, curvas y detalles que necesitas.</li><li>Elige un modelo local instalado. No requiere cuentas ni claves de API.</li><li>Selecciona el motor CAD y la estrategia de generación.</li></ol><p>El resultado se abrirá en su propia página con el visor 360°, los archivos y el diagnóstico de cada intento.</p><a href="#/casos">Explorar e importar prompts →</a>{identificador && <a href={`#/resultado/${identificador}`}>Ver la última ejecución →</a>}</aside>
     </div>}
 
     {ruta.pagina === 'resultado' && <div className="pagina-resultado">
@@ -280,6 +283,11 @@ function Aplicacion() {
         {!ejecucion && <div className="vacio"><div className="vacio-cubo">◇</div><strong>{identificador ? 'Consultando la ejecución' : 'Aún no hay una pieza'}</strong><p>{identificador ? 'El resultado aparecerá aquí cuando la ejecución esté disponible.' : 'Al iniciar una generación verás aquí los intentos, la vista previa y los archivos.'}</p></div>}
         {ejecucion && <>
           <div className={`estado ${colorEstado}`}><span>{ejecucion.estado === 'completada' ? '✓' : ejecucion.estado === 'generando' || ejecucion.estado === 'pendiente' ? '◌' : '!'}</span><div><strong>{ejecucion.estado === 'completada' ? 'Pieza generada' : ejecucion.estado === 'fallida' ? 'Sin CAD válido' : ejecucion.estado === 'bloqueada' ? 'Ejecución interrumpida' : 'Generando y validando'}</strong><small>{ejecucion.mensaje}</small></div></div>
+          <AccionesTrabajo key={ejecucion.identificador + '-' + ejecucion.numero_intentos} ejecucion={ejecucion} modelos={opciones?.modelos} alActualizar={async () => {
+            const respuesta = await fetch(`/api/ejecuciones/${ejecucion.identificador}`);
+            if (!respuesta.ok) throw new Error('No se pudo actualizar el resultado.');
+            cambiarEjecucion(await respuesta.json());
+          }} />
           <p className="descripcion-resultado">{ejecucion.descripcion}</p>
           <div className="resumen"><div><small>MOTOR</small><strong>{nombresMotor[ejecucion.motor]}</strong></div><div><small>MODELO</small><strong>{opciones?.modelos?.[ejecucion.modelo] || nombresModelo[ejecucion.modelo] || ejecucion.modelo}</strong></div><div><small>INTENTOS</small><strong>{ejecucion.numero_intentos} / {ejecucion.modo === 'open-loop' ? 1 : 5}</strong></div></div>
           {activo && <div className="barra"><span /></div>}

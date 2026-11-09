@@ -21,7 +21,7 @@ def asegurar_lote() -> str:
         if anterior:
             return anterior.identificador
     campana = crear_campana("Automático · 45 prompts · 5 modelos", conjunto.identificador,
-        list(MODELOS_LOCALES), list(MOTORES_DISPONIBLES), ["open-loop", "closed-loop"], 1, 20261013, "lote-45")
+        ["L01", "L02", "L03", "L04", "L05"], list(MOTORES_DISPONIBLES), ["open-loop", "closed-loop"], 1, 20261013, "lote-45")
     with crear_sesion() as sesion:
         registro = sesion.get(Campana, campana.identificador)
         registro.configuracion = {**registro.configuracion, "automatico": True,

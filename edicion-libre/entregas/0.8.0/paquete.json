@@ -1,0 +1,15 @@
+{
+  "version": "0.8.0",
+  "sha256_programa": "b84d2bf2bea70be60e41feca8431e4c566be0880fdbc0f5ef9b36465b1dbb929",
+  "bytes_programa": 758936,
+  "origen": {
+    "version": "ciel-nativo-windows-v2",
+    "version_instalador": "0.8.0",
+    "codigo_sha256": "3a04f20297840cd19a7761119843e8afc1853846498ef9f317b6355b0b0d0098",
+    "protocolo": "ciel-campana-manual-v1",
+    "inicio": "manual; campaña, prompts, modelos y motores seleccionados por el usuario",
+    "ejecucion": "solo Windows; Ollama existente; SQLite local",
+    "metrologia": "ciel-metrologia-otter-v2; cotas automáticas, perfiles; impresión manual; escaneo aportado por el usuario",
+    "validacion": "0.7.0 instalada en Windows según confirmación del usuario; 0.8.0 validada en Linux con STL público y controles sintéticos; comprobar actualización en Windows"
+  }
+}

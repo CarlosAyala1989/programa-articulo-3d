@@ -32,6 +32,15 @@ if MODO_NATIVO:
         "perfiles_generacion_nativos_v2.json").read_text(encoding="utf-8"))
     MODELOS_LOCALES = {m["codigo"]: {"nombre": m["nombre"], "cuantizacion": m["cuantizacion"],
         "variable": "OLLAMA_" + m["codigo"]} for m in _perfiles_windows["modelos"]}
+    _registro = Path(os.environ["CIEL_REGISTRO_MODELOS"]) if os.environ.get("CIEL_REGISTRO_MODELOS") else None
+    if _registro and _registro.is_file():
+        _inventario = json.loads(_registro.read_text(encoding="utf-8"))
+        # Mantener los códigos históricos para poder consultar resultados antiguos.
+        for _codigo, _modelo in _inventario.get("modelos", {}).items():
+            MODELOS_LOCALES[_codigo] = {"nombre": _modelo["nombre"], "cuantizacion": _modelo["cuantizacion"],
+                                      "variable": "OLLAMA_" + _codigo}
+        for _codigo, _perfil in MODELOS_LOCALES.items():
+            os.environ[_perfil["variable"]] = _inventario.get("modelos", {}).get(_codigo, {}).get("etiqueta", "")
 MOTORES_DISPONIBLES = {
     "cadquery": "CadQuery",
     "build123d": "build123d",
@@ -51,7 +60,7 @@ MAXIMO_BYTES_CODIGO = PERFIL_NATIVO["maximo_bytes_codigo"] if MODO_NATIVO else 9
 
 def resolver_esfuerzo(modelo: str, esfuerzo_razonamiento: str | None = None) -> None:
     if modelo not in MODELOS_LOCALES:
-        raise ValueError("Esta edición solo admite los cinco modelos de Ollama")
+        raise ValueError("Selecciona un modelo local de Ollama disponible")
     if esfuerzo_razonamiento is not None:
         raise ValueError("Los perfiles locales tienen parámetros fijados; no admiten niveles de esfuerzo")
     return None
@@ -64,4 +73,4 @@ def perfil_generacion(modelo: str, esfuerzo_razonamiento: str | None = None,
         raise ValueError("Esta edición usa el perfil local fijado")
     return {"version": PERFIL_NATIVO["version"] if MODO_NATIVO else "ciel-libre-v1", "temperatura": 0.2, "top_p": 0.9,
             "repeat_penalty": 1.05, "num_predict": MAXIMO_TOKENS_SALIDA,
-            "num_ctx": PERFIL_NATIVO["contextos"][modelo] if MODO_NATIVO else 16384, "keep_alive": 0}
+            "num_ctx": PERFIL_NATIVO["contextos"].get(modelo, 16384) if MODO_NATIVO else 16384, "keep_alive": 0}

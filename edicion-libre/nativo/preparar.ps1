@@ -21,6 +21,7 @@ try {
     $Mutex = New-Object Threading.Mutex($false, 'Local\AgenteCielNativoPreparacion')
     $Bloqueado = $Mutex.WaitOne(0)
     if (-not $Bloqueado) {
+        if ($Modo -eq 'Preparar') { throw 'Hay otra ventana de Agente Ciel abierta. Cierra la aplicacion y su ventana de preparacion antes de actualizar; despues vuelve a ejecutar el instalador.' }
         Start-Process 'http://127.0.0.1:8020'
         exit 0
     }
@@ -31,12 +32,12 @@ try {
     if ([int]$Windows.BuildNumber -lt 19045) { throw 'Se requiere Windows 10 22H2 o Windows 11 x64.' }
     if ([int64]$Windows.TotalVisibleMemorySize -lt (15GB / 1KB)) { throw 'Estos perfiles necesitan al menos 16 GB de RAM; se recomiendan 32 GB.' }
     try { $Activo = Invoke-RestMethod 'http://127.0.0.1:8020/api/opciones' -TimeoutSec 2 } catch { $Activo = $null }
-    if ($Activo -and $Activo.version_protocolo -eq 'ciel-nativo-windows-v2') {
+    if ($Modo -eq 'Abrir' -and $Activo -and $Activo.version_protocolo -eq 'ciel-nativo-windows-manual-v1') {
         Start-Process 'http://127.0.0.1:8020'
         exit 0
     }
     if ($Activo -and $Activo.ejecucion_nativa) {
-        throw 'Cierra la ventana de Agente Ciel Nativo 0.4.2 antes de actualizar. Sus resultados quedan guardados; despues vuelve a ejecutar este instalador.'
+        throw 'Cierra la ventana de la versión anterior de Agente Ciel Nativo antes de actualizar. Sus resultados quedan guardados; despues vuelve a ejecutar este instalador.'
     }
     $Programa = Join-Path $Raiz 'programa'
     if (Test-Path -LiteralPath (Join-Path $Origen 'programa.zip')) {
@@ -44,13 +45,7 @@ try {
         if ((Get-FileHash -LiteralPath (Join-Path $Origen 'programa.zip')).Hash.ToLowerInvariant() -ne $Paquete.sha256_programa) { throw 'El paquete del programa no coincide con su SHA-256.' }
         Expand-Archive -Force -LiteralPath (Join-Path $Origen 'programa.zip') -DestinationPath $Programa
     } else { $Programa = [IO.Path]::GetFullPath((Join-Path $Origen '../programa')) }
-    try { $Tags = (Invoke-RestMethod 'http://127.0.0.1:11434/api/tags' -TimeoutSec 15).models } catch { throw 'Abre Ollama para Windows; debe responder en http://127.0.0.1:11434.' }
-    $Perfiles = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $Programa 'datos/modelos_windows_nativos_v1.json') | ConvertFrom-Json
-    foreach ($Modelo in $Perfiles.modelos) {
-        $Actual = @($Tags | Where-Object { $_.name -eq $Modelo.etiqueta }) | Select-Object -First 1
-        if (-not $Actual) { throw ('Falta en Ollama Windows: ' + $Modelo.etiqueta + '. No se descargaran modelos automaticamente.') }
-        if ($Actual.details.quantization_level -ne $Modelo.cuantizacion) { throw ('Cuantizacion distinta para ' + $Modelo.etiqueta + '. Se necesita ' + $Modelo.cuantizacion) }
-    }
+    Write-Host 'Los modelos de Ollama se detectaran al abrir la interfaz; podras elegirlos antes de ejecutar.'
     $Disco = New-Object IO.DriveInfo([IO.Path]::GetPathRoot($Raiz))
     $EspacioNecesario = 15GB
     $EntornosPreparados = $true
@@ -89,6 +84,7 @@ try {
     $PythonApi = Preparar-Entorno 'api' $PythonBase $Raiz $Origen
     Preparar-Entorno 'cadquery' $PythonBase $Raiz $Origen | Out-Null
     Preparar-Entorno 'build123d' $PythonBase $Raiz $Origen | Out-Null
+    Preparar-Entorno 'metrologia' $PythonBase $Raiz $Origen | Out-Null
     $FreecadDir = Join-Path $Raiz 'freecad'
     $FreecadBin = Encontrar-FreecadBin $FreecadDir
     $ExtraccionCompleta = $false
@@ -105,7 +101,7 @@ try {
         # Reutiliza la descarga verificada. Una carpeta parcial no cuenta como instalación completa.
         $Portable = Descargar-Verificado $Dependencias.freecad $Descargas
         $Extractor = Join-Path $Origen $Dependencias.extractor_7zip.archivo
-        if (-not (Test-Path -LiteralPath $Extractor)) { throw 'Falta herramientas/7zr.exe. Ejecuta el instalador nativo 0.5.0 para completar la actualizacion.' }
+        if (-not (Test-Path -LiteralPath $Extractor)) { throw 'Falta herramientas/7zr.exe. Ejecuta el instalador nativo 0.8.0 para completar la actualizacion.' }
         Invocar-Nativo $PythonApi @((Join-Path $Programa 'nativo/descomprimir_freecad.py'),'--archivo',$Portable,'--destino',$FreecadDir,
             '--extractor',$Extractor,'--sha256-portable',$Dependencias.freecad.sha256,'--sha256-extractor',$Dependencias.extractor_7zip.sha256)
         $FreecadBin = Encontrar-FreecadBin $FreecadDir
@@ -118,9 +114,8 @@ try {
     New-Item -ItemType Directory -Force -Path $Resultados | Out-Null
     Guardar-Json (Join-Path $Raiz 'instalacion.json') @{version=$Dependencias.version; programa=$Programa; resultados=$Resultados; freecad=$FreecadBin}
     $Inicio = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
-    New-Item -Path $Inicio -Force | Out-Null
-    Set-ItemProperty -Path $Inicio -Name 'AgenteCielNativo' -Value ('wscript.exe "' + (Join-Path $Origen 'abrir.vbs') + '"')
-    Write-Host 'Preparacion nativa completa. Iniciando el lote de 1.350 ejecuciones en este Windows.'
+    if (Test-Path $Inicio) { Remove-ItemProperty -Path $Inicio -Name 'AgenteCielNativo' -ErrorAction SilentlyContinue }
+    Write-Host 'Preparacion nativa completa. Abriendo la interfaz para seleccionar una campana.'
     Write-Host ('Resultados: ' + $Resultados)
     Write-Host ('SQLite: ' + (Join-Path $Raiz 'datos/ciel.sqlite'))
     # El instalador termina; la aplicación mantiene su propia ventana y Job Objects.
@@ -133,7 +128,7 @@ try {
         if ($ProcesoAplicacion.HasExited) { throw 'La aplicacion termino durante el arranque. Consulta registros/aplicacion.log.' }
         try {
             $EstadoApi = Invoke-RestMethod 'http://127.0.0.1:8020/api/opciones' -TimeoutSec 2
-            if ($EstadoApi.ejecucion_nativa -and $EstadoApi.version_protocolo -eq 'ciel-nativo-windows-v2') { $Disponible = $true; break }
+            if ($EstadoApi.ejecucion_nativa -and $EstadoApi.version_protocolo -eq 'ciel-nativo-windows-manual-v1') { $Disponible = $true; break }
         } catch {}
         Start-Sleep -Seconds 1
     }
@@ -146,7 +141,7 @@ try {
     try { [IO.File]::WriteAllText((Join-Path $Raiz 'ultimo-error.txt'), ($Mensaje + "`r`nRegistro: " + $Registro), (New-Object Text.UTF8Encoding($false))) } catch {}
     try {
         Add-Type -AssemblyName System.Windows.Forms
-        [Windows.Forms.MessageBox]::Show(($Mensaje + "`r`nRegistro: " + $Registro), 'Agente Ciel Nativo 0.5.0') | Out-Null
+        [Windows.Forms.MessageBox]::Show(($Mensaje + "`r`nRegistro: " + $Registro), 'Agente Ciel Nativo 0.8.0') | Out-Null
     } catch {}
 } finally {
     if ($Transcripcion) { try { Stop-Transcript | Out-Null } catch {} }

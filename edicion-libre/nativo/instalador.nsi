@@ -4,16 +4,16 @@ Unicode true
 !include "LogicLib.nsh"
 !include "x64.nsh"
 Name "Agente Ciel Nativo"
-OutFile "dist-nativo/Agente-Ciel-Nativo-0.5.0-Setup.exe"
+OutFile "dist-nativo/Agente-Ciel-Nativo-0.8.0-Setup.exe"
 InstallDir "$LOCALAPPDATA\AgenteCielNativo"
 RequestExecutionLevel user
 SetCompressor /SOLID lzma
 SetCompressorDictSize 32
 ShowInstDetails show
-VIProductVersion "0.5.0.0"
+VIProductVersion "0.8.0.0"
 VIAddVersionKey "ProductName" "Agente Ciel Nativo"
-VIAddVersionKey "FileDescription" "Instalador Windows nativo de 1.350 ejecuciones"
-VIAddVersionKey "FileVersion" "0.5.0"
+VIAddVersionKey "FileDescription" "Aplicación CAD Windows con comparación de escaneos"
+VIAddVersionKey "FileVersion" "0.8.0"
 VIAddVersionKey "LegalCopyright" "Proyecto Agente Ciel"
 !define MUI_ABORTWARNING
 !insertmacro MUI_PAGE_WELCOME
@@ -43,8 +43,10 @@ Section "Aplicación nativa"
   File "nativo/requirements-api.txt"
   File "nativo/requirements-cadquery.txt"
   File "nativo/requirements-build123d.txt"
+  File "nativo/requirements-metrologia.txt"
   File "nativo/CONDICIONES.txt"
   File "nativo/README.md"
+  File "METROLOGIA_0.8.0.md"
   SetOutPath "$INSTDIR\herramientas"
   File "nativo/herramientas/7zr.exe"
   File "nativo/herramientas/7zip-LICENSE.txt"
@@ -60,9 +62,9 @@ Section "Aplicación nativa"
   CreateShortcut "$SMPROGRAMS\Agente Ciel Nativo\Resultados.lnk" "$WINDIR\explorer.exe" '"$DOCUMENTS\CielLibre\Resultados"'
   WriteUninstaller "$INSTDIR\Desinstalar.exe"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AgenteCielNativo" "DisplayName" "Agente Ciel Nativo"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AgenteCielNativo" "DisplayVersion" "0.5.0"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AgenteCielNativo" "DisplayVersion" "0.8.0"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AgenteCielNativo" "UninstallString" '"$INSTDIR\Desinstalar.exe"'
-  DetailPrint "Preparando Python y motores CAD nativos. Ollama debe estar abierto con los cinco modelos instalados."
+  DetailPrint "Preparando Python y motores CAD nativos. Los modelos de Ollama se seleccionan desde la interfaz."
   ; ExecWait muestra Unicode directamente en PowerShell sin capturarlo como ANSI.
   ExecWait '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\preparar.ps1" -Modo Preparar' $0
   ${If} $0 != "0"
@@ -78,6 +80,6 @@ Section "Uninstall"
   DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AgenteCielNativo"
   DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "AgenteCielNativo"
   ; Conservar toda la evidencia experimental y las dependencias nativas.
-  MessageBox MB_ICONINFORMATION "Accesos directos retirados. Se conservan los modelos de Ollama, SQLite, resultados, bibliotecas y registros. Cierra la ventana de la aplicación para detener el lote."
+  MessageBox MB_ICONINFORMATION "Accesos directos retirados. Se conservan los modelos de Ollama, SQLite, resultados, bibliotecas y registros. Cierra la ventana de la aplicación para detener la ejecución."
   Delete "$INSTDIR\Desinstalar.exe"
 SectionEnd

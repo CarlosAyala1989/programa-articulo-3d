@@ -44,9 +44,10 @@ def construir(compilar: bool = True) -> Path:
         codigo.update(archivo.relative_to(programa).as_posix().encode() + b"\0" + archivo.read_bytes())
     perfil = json.loads((programa / "datos/perfiles_generacion_nativos_v2.json").read_text(encoding="utf-8"))
     origen = {"version": perfil["version"], "version_instalador": VERSION,
-        "codigo_sha256": codigo.hexdigest(), "protocolo": perfil["protocolo_lote"],
-        "n_ejecuciones": 1350, "ejecucion": "solo Windows; Ollama existente; SQLite local",
-        "validacion": "inspección estática y compilación del instalador; sin ejecutar aplicación o benchmark en Ubuntu"}
+        "codigo_sha256": codigo.hexdigest(), "protocolo": "ciel-campana-manual-v1",
+        "inicio": "manual; campaña, prompts, modelos y motores seleccionados por el usuario", "ejecucion": "solo Windows; Ollama existente; SQLite local",
+        "metrologia": "ciel-metrologia-otter-v2; cotas automáticas, perfiles; impresión manual; escaneo aportado por el usuario",
+        "validacion": "0.7.0 instalada en Windows según confirmación del usuario; 0.8.0 validada en Linux con STL público y controles sintéticos; comprobar actualización en Windows"}
     paquete = destino / "programa.zip"
     with zipfile.ZipFile(paquete, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as salida:
         for archivo in archivos:

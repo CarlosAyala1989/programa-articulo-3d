@@ -1,0 +1,46 @@
+.metrologia { margin: 28px 0; padding-top: 22px; border-top: 1px solid var(--borde); color: var(--texto); }
+.metrologia > summary { font-size: 18px; cursor: pointer; }
+.metrologia p, .metrologia small { line-height: 1.65; }
+.metrologia p { max-width: 74ch; }
+.metrologia fieldset { min-width: 0; padding: 18px; margin: 20px 0; border: 1px solid var(--borde); border-radius: 12px; }
+.metrologia legend { padding: 0 8px; font-weight: 600; }
+.metrologia select, .metrologia textarea, .metrologia input { min-width: 0; max-width: 100%; width: 100%; color: var(--texto); background: var(--campo); border: 1px solid var(--borde); border-radius: 9px; padding: 11px; box-sizing: border-box; font: inherit; }
+.metrologia input[type='checkbox'] { width: auto; }
+.metrologia label.opcion-check { display: flex; align-items: center; gap: 12px; }
+.metrologia input[type='file'] { font-size: 14px; }
+.metrologia input::file-selector-button { color: var(--texto); background: var(--superficie-suave); border: 1px solid var(--borde); padding: 8px; border-radius: 5px; margin-right: 8px; cursor: pointer; }
+.metrologia small, .nota-metrologia, .leyenda-metrologia { color: var(--secundario); font-size: 14px; }
+.campos-metrologia { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 20px; }
+.fila-cota { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, .65fr); gap: 0 18px; border-bottom: 1px solid var(--borde); padding-bottom: 18px; margin-bottom: 18px; }
+.fila-cota button { justify-self: start; }
+.resultados-metrologia { margin-top: 32px; padding-top: 22px; border-top: 1px solid var(--borde); }
+.visor-metrologia { position: relative; width: 100%; height: 430px; background: var(--superficie-suave); border-radius: 12px; overflow: hidden; margin-top: 16px; }
+.visor-metrologia canvas { display: block; max-width: 100%; }
+.visor-metrologia p { padding: 24px; }
+.medidas-metrologia { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 22px; margin: 24px 0; font-variant-numeric: tabular-nums; }
+.medidas-metrologia > div { padding: 14px 0; border-bottom: 1px solid var(--borde); }
+.medidas-metrologia dt { color: var(--secundario); font-size: 14px; }
+.medidas-metrologia dd { margin: 6px 0 0; font-size: 18px; font-weight: 600; }
+.enlaces-metrologia { display: flex; flex-wrap: wrap; gap: 12px 24px; margin: 24px 0; }
+.mapa-metrologia { display: block; width: 100%; height: auto; margin-top: 20px; border-radius: 8px; }
+.metrologia button[aria-pressed='true'] { border-color: var(--azul); color: var(--azul); }
+.metrologia :is(button, input, select, textarea, summary, a):focus-visible { outline: 2px solid var(--azul); outline-offset: 3px; }
+.metrologia ::selection { background: var(--azul); color: var(--superficie); }
+.metrologia input, .metrologia textarea { caret-color: var(--azul); }
+.metrologia progress { width: 100%; accent-color: var(--azul); }
+.metrologia .tabla-contenedor { overflow-x: auto; scrollbar-color: var(--borde) var(--superficie-suave); }
+.metrologia th, .metrologia td { font-variant-numeric: tabular-nums; }
+@media (max-width: 650px) {
+  .campos-metrologia, .fila-cota { grid-template-columns: minmax(0, 1fr); }
+  .medidas-metrologia { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 14px; }
+  .visor-metrologia { height: 320px; }
+  .metrologia fieldset { padding: 12px; }
+  .metrologia .acciones { display: flex; flex-wrap: wrap; gap: 8px; }
+}
+
+.acciones-perfil { display: flex; align-items: center; padding-top: 18px; }
+.seleccion-cotas { margin: 18px 0; }
+.seleccion-cotas .opcion-check { margin: 10px 0; }
+
+.seleccion-cotas .opcion-check { align-items: flex-start; }
+.ubicacion-cota { display: block; font-weight: 400; letter-spacing: normal; margin-top: 4px; }

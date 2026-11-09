@@ -24,6 +24,15 @@ def convertir_csv(filas: list[dict], columnas: list[str]) -> str:
     return salida.getvalue()
 
 
+def filas_manufacturabilidad(metricas: dict) -> list[dict]:
+    filas = []
+    for fila in metricas['filas'] + metricas['resumen_condiciones']:
+        for rol, clave in (('nativa', 'topologia'), ('comun', 'topologia_comun')):
+            filas.append({**{k: fila[k] for k in ('modelo', 'motor', 'modo', 'nivel', 'n_planificado', 'n_evaluable', 'final')},
+                          'rol_stl': rol, **fila[clave]})
+    return filas
+
+
 def filas_tabla_digital(metricas: dict) -> list[dict]:
     filas = []
     for fila in metricas["filas"] + metricas["resumen_condiciones"]:
@@ -41,6 +50,7 @@ def filas_tabla_digital(metricas: dict) -> list[dict]:
             "fuente": metricas["campana_identificador"], "comparacion_directa": True,
             "nota": "Compile Rate: ejecución sin excepción. IR código y CAD tienen criterios distintos. Bloqueos operativos excluidos del denominador.",
         })
+    filas.extend(metricas.get("referencias_externas", []))
     for referencia in json.loads(RUTA_LITERATURA.read_text(encoding="utf-8"))["filas"]:
         filas.append({"origen": "literatura", "metodo": referencia["metodo"],
             "nivel": referencia["nivel"], "compile_rate_pct": referencia["compile_rate_reportado_pct"],
@@ -55,7 +65,7 @@ def csv_tabla_digital(metricas: dict) -> str:
     columnas = ["origen", "metodo", "modelo", "motor", "modo", "nivel", "n_planificado", "n_evaluable",
         "n_bloqueado", "n_pendiente", "final", "compile_rate_pct", "ir_codigo_pct", "ir_cad_pct",
         "ir_reportado_pct", "iou_medio", "n_iou", "tiempo_total_media_s", "tiempo_total_desviacion_s",
-        "fuente", "pagina", "tabla", "dataset", "comparacion_directa", "nota"]
+        "fuente", "pagina", "tabla", "dataset", "comparacion_directa", "sha256_resultados_externos", "nota"]
     return convertir_csv(filas_tabla_digital(metricas), columnas)
 
 
@@ -127,9 +137,21 @@ def paquete_resultados(datos: dict, directorio_artefactos: str, destino: Path | 
             paquete.writestr(nombre, bruto)
             huellas.append({"archivo": nombre, "sha256": hashlib.sha256(bruto).hexdigest()})
         agregar("datos_y_trazas.json", json.dumps(datos, ensure_ascii=False, indent=2))
+        agregar("resultados_externos.json", json.dumps(datos.get("resultados_externos", []), ensure_ascii=False, indent=2))
         agregar("prompts.json", json.dumps(datos["conjunto"], ensure_ascii=False, indent=2))
         agregar("tabla_digital.csv", csv_tabla_digital(metricas))
         agregar("literatura_fuentes.json", RUTA_LITERATURA.read_bytes())
+        manufactura = filas_manufacturabilidad(metricas)
+        agregar("manufacturabilidad.csv", convertir_csv(manufactura, list(manufactura[0]) if manufactura else ["modelo"]))
+        registros_fisicos = datos.get("comparaciones_fisicas", [])
+        if registros_fisicos:
+            from aplicacion.informe_fisico import crear_zip
+            fisico = crear_zip(registros_fisicos)
+            try:
+                paquete.write(fisico, "comparaciones_fisicas.zip")
+                huellas.append({"archivo": "comparaciones_fisicas.zip", "sha256": hashlib.sha256(fisico.read_bytes()).hexdigest()})
+            finally:
+                fisico.unlink(missing_ok=True)
         campos_metricas = sorted({clave for fila in metricas["filas"] for clave in fila})
         agregar("metricas.csv", convertir_csv(metricas["filas"], campos_metricas))
         filas_ejecucion = []
@@ -167,12 +189,12 @@ def paquete_resultados(datos: dict, directorio_artefactos: str, destino: Path | 
         for nivel in ["todos"] + sorted({f["nivel"] for f in metricas["filas"]}):
             agregar(f"figuras/compile-rate-{nivel}.svg", figura_compilacion(metricas, "svg", nivel))
         agregar("archivos_ausentes.json", json.dumps(archivos_ausentes, ensure_ascii=False, indent=2))
-        agregar("LEEME.txt", "Resultados de generación y evaluación digital. No hay medidas de piezas físicas.\n"
+        agregar("LEEME.txt", "Resultados digitales; las comparaciones físicas aportadas se incluyen en comparaciones_fisicas.zip cuando existen.\n"
             "Figura: segmentos por primer intento exitoso; sumar segmentos da Compile Rate acumulado.\n"
             "IR código y CAD usan denominadores evaluables, con bloqueos operativos excluidos.\n"
             "IoU requiere referencia independiente y activación explícita; sin referencia queda vacío.\n"
             "La literatura usa otro conjunto y criterios; no implica comparación directa ni ranking.\n"
-            "Los 45 prompts son el tamaño solicitado, inferior al mínimo 50 del PDF.\n"
+            f"Conjunto exportado: {len(datos['conjunto'].get('casos', []))} prompts. El PDF propone 50–100.\n"
             "Consultar estado final/provisional, pendientes, bloqueos y archivos_ausentes.json.\n")
         paquete.writestr("huellas_archivos.json", json.dumps(huellas, ensure_ascii=False, indent=2))
     return destino if destino is not None else salida.getvalue()

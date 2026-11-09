@@ -1,4 +1,4 @@
-"""Edición libre: inferencia exclusivamente en los cinco modelos de Ollama local."""
+"""Edición libre: inferencia exclusivamente en los modelos de Ollama local."""
 
 import os
 import json

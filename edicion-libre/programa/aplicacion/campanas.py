@@ -28,7 +28,7 @@ def validar_matriz(
     conjunto: VersionConjunto, casos: list[CasoDiseno], modelos: list[str],
     motores: list[str], modos: list[str], repeticiones: int, tipo: str,
 ) -> None:
-    if tipo not in {"piloto", "principal", "lote-45"}:
+    if tipo not in {"piloto", "principal", "lote-45", "seleccion"}:
         raise ValueError("Tipo de campaña no reconocido")
     if conjunto.estado != "congelado":
         raise ValueError("El conjunto debe estar congelado")
@@ -45,7 +45,7 @@ def validar_matriz(
     if tipo == "lote-45":
         if conjunto.finalidad != "evaluacion_local_45" or len(casos) != 45:
             raise ValueError("Importa y congela un conjunto local de exactamente 45 prompts")
-        if (set(modelos) != set(MODELOS_LOCALES) or set(motores) != set(MOTORES_DISPONIBLES)
+        if (set(modelos) != {"L01", "L02", "L03", "L04", "L05"} or set(motores) != set(MOTORES_DISPONIBLES)
                 or set(modos) != set(MODOS) or repeticiones != 1):
             raise ValueError("El lote completo cruza cinco modelos, tres motores, dos modos y una repetición: 1.350 ejecuciones")
     if tipo == "principal":
@@ -125,12 +125,12 @@ def crear_campana(
                                               if "reasoning_effort" in perfil), None),
                 "teselacion_nativa": "detalle-v2: absoluta 0.02 mm, angular 0.05 rad",
                 "tarifa": PERFIL_TARIFA,
-                "protocolo_campana": PROTOCOLO_LOTE if tipo == "lote-45" else "ciel-campana-local-v1",
+                "protocolo_campana": PROTOCOLO_LOTE if tipo == "lote-45" else ("ciel-campana-manual-v1" if tipo == "seleccion" else "ciel-campana-local-v1"),
                 "ejecucion_nativa": MODO_NATIVO,
                 "orden": "modelo, motor, modo, dificultad, código" if tipo == "lote-45" else "aleatorio por semilla",
                 "usar_referencias": usar_referencias,
                 "alcance": "generación y evaluación digital; sin medición física",
-                "requisito_tamano_pdf": "45 prompts por solicitud del usuario; el PDF propone 50–100" if tipo == "lote-45" else None,
+                "requisito_tamano_pdf": "45 prompts aprobados por la dirección de la investigación; sustituyen el tamaño propuesto en el PDF" if tipo == "lote-45" else None,
             },
             total_ejecuciones=vista["ejecuciones"],
             maximo_generaciones=vista["maximo_generaciones"],
@@ -190,12 +190,13 @@ def resumen_campana(campana: Campana) -> dict:
         ))
         actual = sesion.scalar(select(Ejecucion).where(
             Ejecucion.campana_identificador == campana.identificador,
-            Ejecucion.estado.in_(["generando", "bloqueada"])
-        ).order_by(Ejecucion.orden_campana).limit(1))
+            Ejecucion.estado == "generando"
+        ).order_by(Ejecucion.orden_campana, Ejecucion.identificador).limit(1))
         caso = sesion.get(CasoDiseno, actual.caso_identificador) if actual and actual.caso_identificador else None
         ejecucion_actual = {"identificador": actual.identificador, "orden": actual.orden_campana,
             "caso": caso.codigo if caso else None, "modelo": actual.modelo, "motor": actual.motor,
-            "modo": actual.modo, "intento": actual.numero_intentos, "mensaje": actual.mensaje} if actual else None
+            "modo": actual.modo, "intento": actual.numero_intentos, "mensaje": actual.mensaje,
+            "estado": actual.estado} if actual else None
     return {
         "identificador": campana.identificador, "nombre": campana.nombre,
         "tipo": campana.tipo, "estado": campana.estado, "mensaje": campana.mensaje,
@@ -314,9 +315,13 @@ def procesar_campana(identificador: str) -> None:
                 )
                 campana.fecha_fin = fecha_actual()
                 sesion.commit()
+                if MODO_NATIVO:
+                    sincronizar_entregables(identificador, final=True)
                 return
             siguiente = ejecucion.identificador
         procesar_ejecucion(siguiente)
+        if MODO_NATIVO:
+            sincronizar_entregables(identificador)
         with crear_sesion() as sesion:
             ejecucion = sesion.get(Ejecucion, siguiente)
             campana = sesion.get(Campana, identificador)
@@ -325,3 +330,12 @@ def procesar_campana(identificador: str) -> None:
                 campana.mensaje = "Incidencia operativa; revisar la ejecución antes de continuar pendientes"
                 sesion.commit()
                 return
+
+
+def sincronizar_entregables(identificador: str, final: bool = False) -> None:
+    import logging
+    from aplicacion.archivado import guardar_resumen
+    try:
+        guardar_resumen(identificador, figuras=final)
+    except Exception:
+        logging.getLogger(__name__).exception("No se pudieron actualizar los entregables de %s; los datos permanecen en SQLite", identificador)

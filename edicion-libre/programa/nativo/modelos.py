@@ -1,4 +1,4 @@
-"""Registrar los cinco modelos existentes de Windows sin descargarlos ni inferir."""
+"""Inventario local de Ollama; descubrir modelos no descarga pesos ni infiere."""
 
 import hashlib
 import json
@@ -10,34 +10,46 @@ import httpx
 
 def registrar_modelos(programa: Path, destino: Path) -> dict:
     perfiles = json.loads((programa / "datos/modelos_windows_nativos_v1.json").read_text(encoding="utf-8"))
-    resultado = {"version": perfiles["version"], "estado": "completo", "modelos": {}}
-    anterior = json.loads(destino.read_text(encoding="utf-8")) if destino.is_file() else None
+    conocidos = {p["etiqueta"].casefold(): p for p in perfiles["modelos"]}
+    resultado = {"version": "ciel-inventario-ollama-v2", "estado": "completo", "modelos": {}, "avisos": []}
+    # El inventario puede cambiar. Cada campaña conserva y verifica su propio digest.
     with httpx.Client(base_url="http://127.0.0.1:11434", timeout=30, trust_env=False) as cliente:
-        respuesta = cliente.get("/api/tags")
-        respuesta.raise_for_status()
-        modelos = {m["name"]: m for m in respuesta.json()["models"]}
-        for perfil in perfiles["modelos"]:
-            etiqueta = perfil["etiqueta"]
-            actual = modelos.get(etiqueta)
-            if actual is None:
-                raise RuntimeError(f"No está instalado {etiqueta} en Ollama Windows. No se descargará automáticamente.")
-            cuantizacion = str((actual.get("details") or {}).get("quantization_level", "")).upper()
-            if cuantizacion != perfil["cuantizacion"]:
-                raise RuntimeError(f"{etiqueta}: se esperaba {perfil['cuantizacion']}, se encontró {cuantizacion}")
+        try:
+            respuesta = cliente.get("/api/tags")
+            respuesta.raise_for_status()
+            modelos = respuesta.json()["models"]
+        except (httpx.HTTPError, ValueError, KeyError) as error:
+            modelos = []
+            resultado["avisos"].append(f"Ollama no está disponible ({type(error).__name__}). Abre Ollama y vuelve a abrir la aplicación.")
+        for actual in sorted(modelos, key=lambda m: m.get("name", m.get("model", ""))):
+            etiqueta = actual.get("name") or actual.get("model")
+            if not etiqueta:
+                continue
             digest = actual.get("digest", "")
             if not re.fullmatch(r"[0-9a-f]{64}", digest):
-                raise RuntimeError(f"Ollama no informa un digest completo para {etiqueta}")
-            fijado = (anterior or {}).get("modelos", {}).get(perfil["codigo"])
-            if fijado and (fijado["digest"] != digest or fijado["etiqueta"] != etiqueta):
-                raise RuntimeError(f"Cambió el modelo {etiqueta}. Conserva el modelo anterior para reanudar; una versión distinta requiere otra carpeta de resultados.")
-            detalle = cliente.post("/api/show", json={"model": etiqueta})
-            detalle.raise_for_status()
-            datos = detalle.json()
+                resultado["avisos"].append(f"{etiqueta}: Ollama no informa un digest completo; no se puede seleccionar.")
+                continue
+            cuantizacion = str((actual.get("details") or {}).get("quantization_level") or "DESCONOCIDA").upper()
+            conocido = conocidos.get(etiqueta.casefold())
+            # Una variante conserva una identidad independiente del protocolo histórico.
+            if conocido and cuantizacion == conocido["cuantizacion"]:
+                perfil = conocido
+            else:
+                perfil = {"codigo": "O" + hashlib.sha256(etiqueta.encode()).hexdigest()[:16],
+                          "nombre": etiqueta, "cuantizacion": cuantizacion}
+            datos = {}
+            try:
+                detalle = cliente.post("/api/show", json={"model": etiqueta})
+                detalle.raise_for_status()
+                datos = detalle.json()
+            except (httpx.HTTPError, ValueError) as error:
+                resultado["avisos"].append(f"No se pudo consultar el detalle de {etiqueta}: {type(error).__name__}")
             blobs = re.findall(r"sha256[-:]([0-9a-f]{64})", datos.get("modelfile", ""))
             resultado["modelos"][perfil["codigo"]] = {
-                **perfil, "digest": digest, "detalles": actual.get("details"), "tamano_bytes": actual.get("size"),
+                **perfil, "etiqueta": etiqueta, "digest": digest,
+                "detalles": actual.get("details"), "tamano_bytes": actual.get("size"),
                 "sha256": blobs[0] if blobs else None, "blobs_modelfile": blobs,
-                "fuente": "Ollama instalado por el usuario en Windows; identidad fijada al iniciar",
+                "fuente": "Ollama local del usuario; identidad verificada al iniciar cada campaña",
                 "plantilla_sha256": hashlib.sha256(datos.get("template", "").encode()).hexdigest(),
                 "ollama_show": datos,
             }

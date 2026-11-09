@@ -11,7 +11,7 @@
     "sha256": "9c6959dc9c4dba64dd818a62447e3dfedb4221d776fb044b239d462f150bcec4",
     "bytes": 418053398
   },
-  "version_instalador": "0.5.0",
+  "version_instalador": "0.8.0",
   "extractor_7zip": {
     "version": "26.04",
     "archivo": "herramientas/7zr.exe",

@@ -1,3 +1,21 @@
+# Código completo del programa nativo y su interfaz web
+
+Copia **toda esta carpeta `edicion-libre/`** para trabajar con la edición Windows. El código está en `programa/`, la interfaz React en `programa/interfaz/` y los scripts de preparación y dependencias en `nativo/`. Sigue [Ejecutar desde el código](nativo/README.md#ejecutar-desde-el-código) para compilar la interfaz y arrancar en Windows.
+
+La entrega actual es **0.8.0**. Para instalarla directamente utiliza [Agente-Ciel-Nativo-0.8.0-Setup.exe](entregas/0.8.0/Agente-Ciel-Nativo-0.8.0-Setup.exe). Las secciones de versiones anteriores que siguen conservan la documentación histórica; el inicio actual de campañas es manual.
+
+# Novedades nativas 0.8.0
+
+Cotas automáticas del escaneo (diámetros y separaciones entre planos), planes por modelo, perfiles reutilizables y Hausdorff discreto con todos los puntos. El estudio principal utiliza los **45 prompts aprobados**; los 60 históricos se conservan. Descarga el [instalador 0.8.0](entregas/0.8.0/Agente-Ciel-Nativo-0.8.0-Setup.exe), consulta [la guía](METROLOGIA_0.8.0.md) y [la validación](VALIDACION_0.8.0.md).
+
+# Novedades nativas 0.7.0
+
+Comparación de piezas impresas manualmente y escaneadas con CR-Scan Otter, entregables físicos y exportaciones completas de campañas manuales. Consulta [la guía de metrología](METROLOGIA_0.7.0.md) y [las instrucciones de Windows](nativo/README.md).
+
+La versión nativa **0.6.0** incorpora historial, variantes y exportación legible compatible con resultados anteriores. Véanse `nativo/README.md` y `VALIDACION_0.6.0.md`.
+
+> Actualización nativa 0.5.1: detección de todos los modelos instalados en Ollama e inicio manual. En Campañas puedes elegir prompts, modelos y librerías antes de calcular, guardar e iniciar. Consulta [la guía nativa](nativo/README.md).
+
 # Agente Ciel para Windows
 
 ## Código y versiones en GitHub

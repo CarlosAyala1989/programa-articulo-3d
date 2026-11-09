@@ -244,5 +244,54 @@ class LoteAutomaticoTests(unittest.TestCase):
         self.assertIsNone(reintento.call_args.kwargs["max_retries"])
 
 
+    def test_resumen_prioriza_generando_frente_a_bloqueadas_antiguas(self):
+        from aplicacion.campanas import resumen_campana
+        with self.sesiones() as sesion:
+            filas = list(sesion.scalars(select(Ejecucion).order_by(Ejecucion.orden_campana).limit(3)))
+            filas[0].estado = 'bloqueada'
+            filas[1].estado = 'bloqueada'
+            filas[2].estado = 'generando'
+            filas[2].numero_intentos = 3
+            campana = sesion.get(Campana, self.identificador)
+            campana.estado = 'en_curso'
+            ids = [e.identificador for e in filas]
+            sesion.commit()
+        resumen = resumen_campana(campana)
+        self.assertEqual(resumen['ejecucion_actual']['identificador'], ids[2])
+        self.assertEqual(resumen['ejecucion_actual']['intento'], 3)
+        self.assertEqual(resumen['estados_ejecucion']['bloqueada'], 2)
+
+    def test_resumen_actualiza_enlace_tras_pausa_y_siguiente_ejecucion(self):
+        from aplicacion.campanas import resumen_campana
+        with self.sesiones() as sesion:
+            filas = list(sesion.scalars(select(Ejecucion).order_by(Ejecucion.orden_campana).limit(3)))
+            filas[0].estado = 'bloqueada'
+            filas[1].estado = 'generando'
+            campana = sesion.get(Campana, self.identificador)
+            campana.estado = 'en_curso'
+            ids = [e.identificador for e in filas]
+            sesion.commit()
+        self.assertEqual(resumen_campana(campana)['ejecucion_actual']['identificador'], ids[1])
+        with self.sesiones() as sesion:
+            sesion.get(Ejecucion, ids[1]).estado = 'pausada'
+            sesion.commit()
+        self.assertIsNone(resumen_campana(campana)['ejecucion_actual'])
+        with self.sesiones() as sesion:
+            sesion.get(Ejecucion, ids[1]).estado = 'completada'
+            sesion.get(Ejecucion, ids[2]).estado = 'generando'
+            sesion.commit()
+        resumen = resumen_campana(campana)
+        self.assertEqual(resumen['ejecucion_actual']['identificador'], ids[2])
+        self.assertEqual(resumen['estados_ejecucion']['completada'], 1)
+
+    def test_resumen_sin_activa_no_presenta_bloqueada_como_en_curso(self):
+        from aplicacion.campanas import resumen_campana
+        with self.sesiones() as sesion:
+            sesion.get(Ejecucion, self.primera().identificador).estado = 'bloqueada'
+            campana = sesion.get(Campana, self.identificador)
+            sesion.commit()
+        self.assertIsNone(resumen_campana(campana)['ejecucion_actual'])
+
+
 if __name__ == "__main__":
     unittest.main()

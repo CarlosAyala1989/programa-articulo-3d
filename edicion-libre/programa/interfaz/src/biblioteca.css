@@ -1,0 +1,26 @@
+.biblioteca { min-width: 0; }
+.filtros-biblioteca, .rejilla-biblioteca, .rejilla-vistas { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 18px; margin: 20px 0; }
+.biblioteca label { display: grid; gap: 8px; margin: 12px 0; }
+.biblioteca input, .biblioteca select, .biblioteca textarea { width: 100%; min-width: 0; box-sizing: border-box; }
+.trabajo-biblioteca { padding: 16px; border: 1px solid currentColor; border-radius: 12px; min-width: 0; }
+.trabajo-biblioteca p, .biblioteca a { overflow-wrap: anywhere; }
+.trabajo-biblioteca h2 { font-size: 18px; }
+.trabajo-biblioteca img, .rejilla-vistas img { width: 100%; height: auto; border-radius: 8px; }
+.sin-miniatura { padding: 50px 12px; text-align: center; opacity: .65; }
+.rejilla-vistas a { text-align: center; }
+.biblioteca details { margin: 18px 0; }
+.biblioteca a { color: var(--azul); text-decoration: none; }
+.biblioteca a:hover { text-decoration: underline; }
+.biblioteca input { padding: 12px; border: 1px solid var(--borde); border-radius: 9px; background: var(--campo); color: var(--texto); font: inherit; }
+.biblioteca button:not(.boton) { padding: 10px 15px; border: 1px solid var(--borde); border-radius: 9px; background: var(--superficie-suave); color: var(--texto); font: inherit; cursor: pointer; }
+.biblioteca button:disabled { opacity: .5; cursor: default; }
+.biblioteca button:hover:not(:disabled) { background: var(--superficie-hover); }
+.biblioteca .boton:hover:not(:disabled) { background: var(--azul-hover); }
+.trabajo-biblioteca { border-color: var(--borde); background: var(--superficie); }
+.trabajo-biblioteca small, .sin-miniatura { color: var(--secundario); }
+.trabajo-biblioteca > p:first-of-type { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+
+.campana-principal { padding: 18px; margin-bottom: 24px; border: 1px solid var(--borde); border-radius: 12px; background: var(--superficie-suave); }
+.campana-principal p { color: var(--secundario); font-size: 14px; line-height: 1.6; }
+.filtros-secundarios { min-width: 0; margin: 0 0 20px; padding: 12px 18px; border: 1px solid var(--borde); border-radius: 12px; }
+.filtros-secundarios legend { padding: 0 8px; font-weight: 600; }

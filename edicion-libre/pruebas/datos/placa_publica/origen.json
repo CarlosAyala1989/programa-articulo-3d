@@ -1,0 +1,15 @@
+{
+  "repositorio": "https://github.com/mikedh/trimesh",
+  "commit": "fb7fc0b374ba72a3cce5bfb553ad90c805ce0b8e",
+  "archivos": {
+    "placa_agujeros.stl": {
+      "url": "https://raw.githubusercontent.com/mikedh/trimesh/fb7fc0b374ba72a3cce5bfb553ad90c805ce0b8e/models/plate_holes.STL",
+      "sha256": "318f92206dd20b2cede5b70eb5e686d3627c6b157b91e9ed383314329dcff209"
+    },
+    "LICENCIA-MIT.txt": {
+      "url": "https://raw.githubusercontent.com/mikedh/trimesh/fb7fc0b374ba72a3cce5bfb553ad90c805ce0b8e/LICENSE.md",
+      "sha256": "aa5f08b59e979fcb94975511f468edc3121f5f93c9b0752c9406937e4c26c692"
+    }
+  },
+  "uso": "Modelo público de ensayo; no es un escaneo físico ni un resultado experimental."
+}

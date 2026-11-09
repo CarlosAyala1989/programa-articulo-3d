@@ -10,13 +10,19 @@ from aplicacion.configuracion import MODO_NATIVO, PROTOCOLO_LOTE
 
 def preparar_reinicio(programar: bool = True) -> None:
     crear_tablas()
+    inicio_manual = MODO_NATIVO and os.environ.get("CIEL_AUTOMATICO") != "1"
     if os.environ.get("CIEL_AUTOMATICO") == "1":
         from aplicacion.automatico import asegurar_lote
         asegurar_lote()
     with crear_sesion() as sesion:
         if MODO_NATIVO:
             for campana in sesion.scalars(select(Campana)):
-                if ((campana.configuracion or {}).get("automatico")
+                if inicio_manual and campana.estado in {"en_curso", "bloqueada"}:
+                    campana.estado = "pausada"
+                    campana.mensaje = "Inicio manual; selecciona esta campaña y pulsa Iniciar para continuar"
+                    if (campana.configuracion or {}).get("automatico"):
+                        campana.configuracion = {**campana.configuracion, "pausa_manual": True}
+                elif ((campana.configuracion or {}).get("automatico")
                         and (campana.configuracion or {}).get("protocolo_campana") != PROTOCOLO_LOTE
                         and campana.estado in {"borrador", "en_curso", "bloqueada"}):
                     campana.estado = "pausada"
@@ -33,6 +39,11 @@ def preparar_reinicio(programar: bool = True) -> None:
             ejecucion.estado = "bloqueada"
             ejecucion.mensaje = "Interrumpida por reinicio; revisar respuesta y posible costo antes de otro ensayo"
             ejecucion.fecha_fin = fecha_actual()
+        # La cola nativa reside en memoria: no dejar trabajos individuales esperando para siempre.
+        for ejecucion in sesion.scalars(select(Ejecucion).where(
+                Ejecucion.estado == 'pendiente', Ejecucion.campana_identificador.is_(None))):
+            ejecucion.estado = 'bloqueada'
+            ejecucion.mensaje = 'Trabajo en cola interrumpido por cierre; crea otra generación o variante para continuar'
         activas = list(sesion.scalars(select(Campana).where(Campana.estado == "en_curso")))
         for campana in activas:
             if (campana.configuracion or {}).get("automatico"):
@@ -48,7 +59,7 @@ def preparar_reinicio(programar: bool = True) -> None:
                        if ((c.configuracion or {}).get("automatico")
                            and (not MODO_NATIVO or (c.configuracion or {}).get("protocolo_campana") == PROTOCOLO_LOTE)
                            and c.estado in {"borrador", "en_curso", "bloqueada", "completada"})]
-    if programar:
+    if programar and not inicio_manual:
         if MODO_NATIVO:
             from aplicacion.tareas_nativas import tarea_campana
         else:

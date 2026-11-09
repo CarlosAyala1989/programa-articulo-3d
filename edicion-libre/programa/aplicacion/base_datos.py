@@ -20,6 +20,8 @@ class Ejecucion(BaseDeclarativa):
     __tablename__ = "ejecuciones"
 
     identificador: Mapped[str] = mapped_column(String(36), primary_key=True)
+    contexto_variante: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    origen_identificador: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     descripcion: Mapped[str] = mapped_column(Text, nullable=False)
     motor: Mapped[str] = mapped_column(String(30), nullable=False)
     modelo: Mapped[str] = mapped_column(String(60), nullable=False)
@@ -249,6 +251,53 @@ class ComparacionDigital(BaseDeclarativa):
     )
 
 
+class ResultadoExterno(BaseDeclarativa):
+    """Ejecuciones externas aportadas para comparar los mismos casos y criterio."""
+
+    __tablename__ = "resultados_externos"
+    identificador: Mapped[str] = mapped_column(String(36), primary_key=True)
+    campana_identificador: Mapped[str] = mapped_column(ForeignKey("campanas.identificador"), index=True)
+    documento: Mapped[dict] = mapped_column(JSON)
+    sha256: Mapped[str] = mapped_column(String(64))
+    fecha_creacion: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=fecha_actual)
+
+
+class ComparacionFisica(BaseDeclarativa):
+    """Medición independiente: nunca cambia el CAD ni el éxito de su generación."""
+
+    __tablename__ = "comparaciones_fisicas"
+    identificador: Mapped[str] = mapped_column(String(36), primary_key=True)
+    ejecucion_identificador: Mapped[str] = mapped_column(ForeignKey("ejecuciones.identificador"), index=True)
+    estado: Mapped[str] = mapped_column(String(30), default="borrador")
+    diagnostico: Mapped[str] = mapped_column(Text, default="")
+    nombre_escaneo: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    escaneo_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    nominal_sha256: Mapped[str] = mapped_column(String(64))
+    configuracion: Mapped[dict] = mapped_column(JSON, default=dict)
+    resultado: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    alineacion_confirmada: Mapped[bool] = mapped_column(Boolean, default=False)
+    fecha_creacion: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=fecha_actual)
+    fecha_fin: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class PlanCotas(BaseDeclarativa):
+    __tablename__ = 'planes_cotas'
+    identificador: Mapped[str] = mapped_column(String(36), primary_key=True)
+    ejecucion_identificador: Mapped[str] = mapped_column(ForeignKey('ejecuciones.identificador'), index=True)
+    nominal_sha256: Mapped[str] = mapped_column(String(64))
+    sha256: Mapped[str] = mapped_column(String(64))
+    documento: Mapped[dict] = mapped_column(JSON)
+    fecha_creacion: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=fecha_actual)
+
+
+class PerfilMetrologia(BaseDeclarativa):
+    __tablename__ = 'perfiles_metrologia'
+    identificador: Mapped[str] = mapped_column(String(36), primary_key=True)
+    nombre: Mapped[str] = mapped_column(String(100))
+    configuracion: Mapped[dict] = mapped_column(JSON)
+    fecha_creacion: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=fecha_actual)
+
+
 motor_base_datos = create_engine(URL_BASE_DATOS, pool_pre_ping=True,
     **({"connect_args": {"check_same_thread": False, "timeout": 60}}
        if URL_BASE_DATOS.startswith("sqlite:") else {}))
@@ -264,10 +313,46 @@ crear_sesion = sessionmaker(bind=motor_base_datos, expire_on_commit=False)
 
 
 def crear_tablas() -> None:
+    # Copia consistente antes de ampliar una base histórica SQLite.
+    if motor_base_datos.dialect.name == "sqlite" and motor_base_datos.url.database not in {None, ":memory:"}:
+        import sqlite3
+        from pathlib import Path
+        ruta = Path(motor_base_datos.url.database)
+        if ruta.is_file():
+            with motor_base_datos.connect() as conexion:
+                tablas = inspect(conexion).get_table_names()
+                antiguas = "ejecuciones" in tablas and "contexto_variante" not in {
+                    c["name"] for c in inspect(conexion).get_columns("ejecuciones")}
+            if antiguas:
+                copia = ruta.with_name(ruta.name + ".antes-0.6.0-" + datetime.now().strftime("%Y%m%d%H%M%S%f") + ".bak")
+                with sqlite3.connect(ruta) as origen, sqlite3.connect(copia) as destino:
+                    origen.backup(destino)
+    if motor_base_datos.dialect.name == "sqlite" and motor_base_datos.url.database not in {None, ":memory:"}:
+        from pathlib import Path
+        import sqlite3
+        ruta = Path(motor_base_datos.url.database)
+        with motor_base_datos.connect() as conexion:
+            tablas = inspect(conexion).get_table_names()
+        if ruta.is_file() and "ejecuciones" in tablas and "comparaciones_fisicas" not in tablas:
+            copia = ruta.with_name(ruta.name + ".antes-0.7.0-" + datetime.now().strftime("%Y%m%d%H%M%S%f") + ".bak")
+            with sqlite3.connect(ruta) as origen, sqlite3.connect(copia) as destino:
+                origen.backup(destino)
+    if motor_base_datos.dialect.name == 'sqlite' and motor_base_datos.url.database not in {None, ':memory:'}:
+        from pathlib import Path
+        import sqlite3
+        ruta = Path(motor_base_datos.url.database)
+        with motor_base_datos.connect() as conexion:
+            tablas = inspect(conexion).get_table_names()
+        if ruta.is_file() and 'comparaciones_fisicas' in tablas and 'planes_cotas' not in tablas:
+            copia = ruta.with_name(ruta.name + '.antes-0.8.0-' + datetime.now().strftime('%Y%m%d%H%M%S%f') + '.bak')
+            with sqlite3.connect(ruta) as origen, sqlite3.connect(copia) as destino:
+                origen.backup(destino)
     BaseDeclarativa.metadata.create_all(motor_base_datos)
     # Expansión compatible con los trabajos del piloto creados antes de las campañas.
     cambios = {
         "ejecuciones": [
+            "contexto_variante JSON",
+            "origen_identificador VARCHAR(36)",
             "esfuerzo_razonamiento VARCHAR(10)",
             "campana_identificador VARCHAR(36)",
             "caso_identificador VARCHAR(36)",

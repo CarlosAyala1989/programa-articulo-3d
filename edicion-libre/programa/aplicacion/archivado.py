@@ -3,6 +3,8 @@
 import hashlib
 import json
 import re
+import threading
+from functools import wraps
 from pathlib import Path
 from uuid import uuid4
 
@@ -37,24 +39,25 @@ def guardar_json(ruta: Path, datos) -> None:
 
 
 def carpeta_campana(campana: Campana) -> Path:
-    return Path(DIRECTORIO_RESULTADOS) / ("L45-" + campana.identificador)
+    return Path(DIRECTORIO_RESULTADOS) / (("L45-" if (campana.configuracion or {}).get("automatico") else "Campana-") + campana.identificador)
 
 
 def carpeta_ejecucion(campana: Campana, caso: CasoDiseno, ejecucion: Ejecucion) -> Path:
-    perfil = MODELOS_LOCALES[ejecucion.modelo]
+    perfil = MODELOS_LOCALES.get(ejecucion.modelo, {"nombre": ejecucion.modelo, "cuantizacion": "no_registrada"})
     nombre = f"{ejecucion.modelo}_{perfil['nombre']}_{perfil['cuantizacion']}"
     nivel = {"basico": "01_basico", "intermedio": "02_intermedio", "complejo": "03_complejo"}[caso.nivel]
-    return carpeta_campana(campana) / segmento(nombre) / segmento(ejecucion.motor) / segmento(ejecucion.modo) / nivel / segmento(caso.codigo)
+    codigo = caso.codigo if (campana.configuracion or {}).get("automatico") else f"{caso.codigo}__R{ejecucion.repeticion}__{ejecucion.identificador[:8]}"
+    return carpeta_campana(campana) / segmento(nombre) / segmento(ejecucion.motor) / segmento(ejecucion.modo) / nivel / segmento(codigo)
 
 
 def guardar_ejecucion(identificador: str) -> None:
     with crear_sesion() as sesion:
         ejecucion = sesion.get(Ejecucion, identificador)
         campana = sesion.get(Campana, ejecucion.campana_identificador) if ejecucion and ejecucion.campana_identificador else None
-        if not campana or campana.tipo != "lote-45" or not (campana.configuracion or {}).get("automatico"):
+        if not campana or (not MODO_NATIVO and not (campana.configuracion or {}).get("automatico")):
             return
         caso = sesion.get(CasoDiseno, ejecucion.caso_identificador)
-        condicion = sesion.get(CondicionExperimental, ejecucion.condicion_identificador)
+        condicion = sesion.get(CondicionExperimental, ejecucion.condicion_identificador) if ejecucion.condicion_identificador else None
         carpeta = carpeta_ejecucion(campana, caso, ejecucion)
         guardar_atomico(carpeta / "prompt.txt", caso.descripcion)
         guardar_json(carpeta / "caso.json", {"codigo": caso.codigo, "nivel": caso.nivel,
@@ -99,7 +102,19 @@ def guardar_ejecucion(identificador: str) -> None:
             "referencia": {clave: getattr(comparacion, clave) for clave in ("estado", "iou_brep", "chamfer_digital_mm2", "referencia_sha256", "diagnostico")} if comparacion else None})
 
 
-def guardar_resumen(identificador: str, figuras: bool = False) -> None:
+BLOQUEO_RESUMEN = threading.RLock()
+
+
+def serializar_exportaciones(funcion):
+    @wraps(funcion)
+    def protegida(*args, **kwargs):
+        with BLOQUEO_RESUMEN:
+            return funcion(*args, **kwargs)
+    return protegida
+
+
+@serializar_exportaciones
+def guardar_resumen(identificador: str, figuras: bool = False, copia_sqlite: bool = False) -> None:
     from aplicacion.campanas import resumen_campana
     from aplicacion.metricas import calcular_metricas_campana
     from aplicacion.resultados import convertir_csv, csv_tabla_digital, figura_compilacion
@@ -115,24 +130,32 @@ def guardar_resumen(identificador: str, figuras: bool = False) -> None:
             "actual": next((fila for fila in filas if fila["estado"] not in {"completada", "fallida", "cancelada"}), None)})
         guardar_atomico(carpeta / "ejecuciones.csv", convertir_csv(filas, list(filas[0]) if filas else ["identificador"]))
         datos = Path(__file__).resolve().parents[1] / "datos"
-        for archivo in ("45_prompts_Agente_Ciel.md", "prompts_45_v1.json", "origen_prompts45.json", "literatura_digital_v1.json"):
-            guardar_atomico(carpeta / "protocolo" / archivo, (datos / archivo).read_bytes())
+        from aplicacion.base_datos import VersionConjunto
+        conjunto = sesion.get(VersionConjunto, campana.conjunto_identificador)
+        casos = list(sesion.scalars(select(CasoDiseno).where(CasoDiseno.conjunto_identificador == campana.conjunto_identificador)))
+        guardar_json(carpeta / "protocolo/conjunto.json", {"nombre": conjunto.nombre, "version": conjunto.version,
+            "huella_sha256": conjunto.huella_sha256, "casos": [{k: getattr(c, k) for k in (
+                "codigo", "nivel", "familia", "fundamento", "descripcion", "especificacion")} for c in casos]})
+        if (campana.configuracion or {}).get("automatico"):
+            for archivo in ("45_prompts_Agente_Ciel.md", "prompts_45_v1.json", "origen_prompts45.json"):
+                guardar_atomico(carpeta / "protocolo" / archivo, (datos / archivo).read_bytes())
+        guardar_atomico(carpeta / "protocolo/literatura_digital_v1.json", (datos / "literatura_digital_v1.json").read_bytes())
     metricas = calcular_metricas_campana(identificador)
     guardar_json(carpeta / "metricas.json", metricas)
     guardar_atomico(carpeta / "tabla_digital.csv", csv_tabla_digital(metricas))
     guardar_atomico(carpeta / "metricas.csv", convertir_csv(metricas["filas"], sorted({k for f in metricas["filas"] for k in f})))
     if MODO_NATIVO:
         from nativo.exportaciones import exportar
-        exportar(identificador, carpeta, metricas, copia_sqlite=figuras)
+        exportar(identificador, carpeta, metricas, copia_sqlite=figuras or copia_sqlite)
     if figuras:
         for nivel in ("todos", "basico", "intermedio", "complejo"):
             for formato in ("svg", "png"):
                 guardar_atomico(carpeta / "figuras" / f"compile-rate-{nivel}.{formato}", figura_compilacion(metricas, formato, nivel))
-    guardar_atomico(carpeta / "LEEME.txt", "Campaña piloto: 45 prompts, 5 modelos, 3 motores y 2 estrategias; 1.350 ejecuciones.\n"
+    guardar_atomico(carpeta / "LEEME.txt", f"Campaña {campana.nombre}: {len({e.caso_identificador for e in ejecuciones})} prompts seleccionados; {len(ejecuciones)} ejecuciones.\n"
         "Carpetas: modelo / motor / modo / dificultad / código. Cada intento conserva código, respuesta, errores y tiempos.\n"
         "Los bloqueos de infraestructura se reintentan; los fallos CAD definitivos se registran y se pasa al siguiente prompt.\n"
         "Recuperaciones operativas en solicitud.json. Una respuesta perdida antes de persistirse puede necesitar otra llamada local.\n"
         "Los archivos ya terminados no se regeneran. Progreso.json es informativo; el checkpoint autoritativo es la base de datos local.\n"
-        "Figuras finales y métricas en la raíz. IoU solo con referencia independiente habilitada. Sin mediciones físicas.\n"
+        "Figuras finales y métricas en la raíz. IoU solo con referencia independiente habilitada. Las comparaciones físicas se exportan por separado desde la interfaz.\n"
         "Tiempo total es tiempo transcurrido, incluidas pausas; latencias por intento se registran aparte.\n"
         "La literatura no usa el mismo conjunto; sus tasas no son una comparación pareada por dificultad.\n")

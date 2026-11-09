@@ -1,4 +1,63 @@
-# Agente Ciel Nativo 0.5.0
+# Agente Ciel Nativo 0.8.0
+
+Añade **Comparar resultado** en cada trabajo exitoso: escaneo del CR-Scan Otter (STL/OBJ/PLY y nubes), alineación rígida sin ajustar escala, superposición 3D, Hausdorff/Chamfer físicos, cotas automáticas de diámetros y planos, perfiles reutilizables, medidas complementarias, mapas en mm y entregables con hashes. La impresión sigue siendo manual. Las fotos, calibración y mediciones se registran junto a cada comparación; el CAD original se conserva.
+
+Actualiza con `Agente-Ciel-Nativo-0.8.0-Setup.exe` usando el mismo usuario, después de pausar y cerrar la aplicación y su consola. La preparación añade un entorno separado de metrología y conserva los runtimes CAD. Comprueba **v0.8.0** en la cabecera. Se hace una copia de SQLite antes de ampliar la base histórica.
+
+Las campañas manuales exportan manufacturabilidad y metrología; **Actualizar archivos locales** regenera derivados sin inferencia. En Métricas puedes aportar resultados externos de los mismos casos para completar comparaciones digitales con fuente y condiciones.
+
+Guía completa: `METROLOGIA_0.8.0.md`, incluida en la carpeta de instalación y en la entrega. Las instrucciones de versiones anteriores se conservan como antecedentes.
+
+# Agente Ciel Nativo 0.6.2
+
+Corrige el enlace **Ver ejecución**: muestra únicamente la ejecución que está generando, aunque existan ejecuciones antiguas bloqueadas. El resumen se actualiza aunque fallen las métricas, sin superponer consultas. Incluye el selector principal de campaña en Historial.
+
+**Para actualizar:** pausa la campaña y espera a que termine la ejecución ya iniciada. Cierra la ventana de la aplicación y la consola/preparación que mantiene el servicio. Cerrar solo la pestaña del navegador no detiene Ciel. Ejecuta `Agente-Ciel-Nativo-0.6.2-Setup.exe` con el mismo usuario. Si la aplicación sigue abierta, el instalador avisará y tendrás que cerrarla y ejecutar el instalador otra vez. Conserva los datos, modelos y resultados anteriores. Al abrir, comprueba que la cabecera muestra **v0.6.2**; si el navegador conserva la página anterior, pulsa **Ctrl+F5**.
+
+No se repiten ni modifican ejecuciones terminadas. Las bloqueadas se conservan y no se confunden con la ejecución activa.
+
+# Agente Ciel Nativo 0.6.1
+
+El Historial ahora muestra **Campaña** como filtro principal, con una lista de campañas guardadas por nombre, estado e identificador corto. Debajo están prompt, librería, modelo y estado. Al cambiar de campaña se limpian los filtros secundarios y se vuelve a la primera página. La opción Todas incluye también los trabajos individuales.
+
+Cierra la aplicación y ejecuta `Agente-Ciel-Nativo-0.6.1-Setup.exe` con el mismo usuario. Conserva los datos y resultados anteriores.
+
+# Agente Ciel Nativo 0.6.0
+
+Esta actualización añade **Historial**, vistas del modelo y **Crear variante**. Cierra la aplicación y ejecuta `Agente-Ciel-Nativo-0.6.0-Setup.exe` con el mismo usuario de Windows. No borres los datos anteriores.
+
+- Historial consulta también las generaciones antiguas: busca por código de prompt, descripción o UUID y filtra por librería, modelo, estado y campaña.
+- Abre un resultado y pulsa **Generar / actualizar vistas** para crear las imágenes que falten desde su STL guardado. No consulta Ollama ni vuelve a ejecutar CAD. Las generaciones nuevas producen estas vistas automáticamente.
+- **Crear variante** utiliza el código de un intento válido y tus instrucciones para generar otro trabajo. El original y su campaña se conservan. Selecciona un modelo disponible y pulsa Generar variante; abrir el historial nunca inicia inferencias.
+- **Descargar trabajo completo** y **Descargar campaña en formato legible** producen ZIP con carpetas como `B01__CadQuery__EXITO-TECNICO__closed-loop__a13f42bc`. Incluyen prompt, intentos fallidos y correctos, código, CAD disponible, imágenes y manifiesto con hashes y archivos ausentes. El código del conjunto y su versión están en el resumen. EXITO-TECNICO no certifica fidelidad geométrica.
+- Para prompts libres se usa LIBRE; si falta la asociación histórica se indica SIN-CODIGO. Los datos no registrados se muestran explícitamente. No se renombran carpetas históricas ni cambian enlaces anteriores.
+- Antes de ampliar una SQLite histórica se crea a su lado una copia `ciel.sqlite.antes-0.6.0-<fecha>.bak`. La migración es aditiva. Conserva esa copia junto con los artefactos originales.
+
+La biblioteca funciona localmente sin Ollama abierto; generar variantes sí requiere un modelo disponible. No incluye importación entre equipos ni sincronización en la nube.
+
+## Instrucciones de la versión anterior
+
+# Agente Ciel Nativo 0.5.1
+
+Esta actualización corrige el bloqueo por etiquetas de modelos y activa el inicio manual.
+
+1. Cierra la aplicación anterior y ejecuta `Agente-Ciel-Nativo-0.5.1-Setup.exe` con el mismo usuario de Windows. Conserva la instalación y sus resultados.
+2. Abre Ollama. La aplicación consulta todos sus modelos locales, aunque haya más de cinco o usen etiquetas diferentes. No descarga modelos ni genera al abrirse. Si Ollama está cerrado, permite abrir la interfaz; abre Ollama y vuelve a abrir la aplicación para actualizar el inventario.
+3. En **Campañas**, selecciona el conjunto incluido de 45 prompts o importa tu CSV/JSON. Elige **Selección manual**, marca los prompts (o pulsa Seleccionar los 45 prompts), modelos, librerías CAD y estrategias.
+4. Pulsa **Calcular matriz**, revisa el total y **Guardar campaña**. Solo **Iniciar campaña** comienza el trabajo, de forma secuencial.
+5. Al volver a abrir el programa las campañas permanecen pausadas. Elige una campaña guardada y pulsa Iniciar para continuar.
+
+Python 3.14 puede permanecer instalado. El preparador utiliza Python 3.11 x64 separado para las dependencias CAD fijadas y no sustituye el Python del sistema. Se mantienen las versiones de las bibliotecas de 0.5.0.
+
+Las variantes de modelos tienen un código estable independiente de L01–L05 y un contexto predeterminado de 16.384 tokens. El lote histórico completo mantiene sus cinco perfiles originales y sus restricciones. Las campañas nuevas con selección manual usan `ciel-campana-manual-v1`; sus digest se fijan al iniciar y se verifican al reanudar. Una actualización de pesos exige otra campaña. No se modifican los resultados históricos ni los 60 casos congelados.
+
+SQLite y los artefactos permanecen en `%LOCALAPPDATA%\AgenteCielNativo\datos`. Las campañas permiten descargar CSV, JSON, figuras y entregables desde la interfaz. Las carpetas de resultados del lote histórico permanecen en Documentos / CielLibre / Resultados. Las referencias STEP solo se usan en evaluación con la opción explícita y nunca se envían al modelo.
+
+Validación: pruebas automatizadas con Ollama y CAD simulados, construcción de interfaz y compilación del instalador. La instalación y generación reales deben comprobarse en Windows.
+
+## Referencia histórica de 0.5.0
+
+Las instrucciones siguientes describen 0.5.0; para 0.5.1 aplica el inicio manual indicado arriba.
 
 ## Instalación en Windows
 
@@ -68,13 +127,19 @@ El protocolo actual es `ciel-lote-45-windows-nativo-v2`. Gemma Q8_0 y FreeCAD 1.
 
 ## Ejecutar desde el código
 
-Con el repositorio copiado a Windows, abre PowerShell en su raíz:
+Copia toda la carpeta `edicion-libre/`: `programa/` contiene el código, pero también necesitas `nativo/` para preparar las dependencias de Windows. `programa/nativo/` por sí sola contiene únicamente los módulos de arranque y ejecución, no la aplicación completa.
+
+Instala Node.js compatible con Vite 7 (20.19+ o 22.12+) y abre PowerShell dentro de `edicion-libre/`. Compila la interfaz antes del primer arranque; `node_modules/` y `dist/` se generan localmente y no se guardan en Git:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\edicion-libre\nativo\preparar.ps1
+npm --prefix programa/interfaz ci
+npm --prefix programa/interfaz run construir
+powershell -NoProfile -ExecutionPolicy Bypass -File .\nativo\preparar.ps1
 ```
 
-Este comando prepara las mismas bibliotecas y arranca la misma aplicación. Ollama y los cinco modelos deben estar disponibles previamente.
+El preparador instala las bibliotecas fijadas y arranca la aplicación en `http://127.0.0.1:8020`. Requiere internet para preparar las dependencias. Para generar CAD, abre Ollama para Windows con los modelos que quieras seleccionar; el inicio actual es manual y no exige tener los cinco perfiles históricos.
+
+Para instalar sin compilar el código, utiliza `entregas/0.8.0/Agente-Ciel-Nativo-0.8.0-Setup.exe`: incluye la interfaz compilada y los scripts de preparación.
 
 ## Diagnóstico
 

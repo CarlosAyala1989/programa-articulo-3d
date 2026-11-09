@@ -1,0 +1,6 @@
+cc2d3951b1d938ddcb0ce497adb1457c7dbbe9a9690126cd992ed8e082613a84  Agente-Ciel-Nativo-0.8.0-Setup.exe
+91ffe4408b26dbdef3d60f1dbcf81f338bf62c30d0fe6cc57ccea9a4b689cf6f  METROLOGIA_0.8.0.md
+a1ea7c9dd3bbbc10e02c8efcfd4cd6c841296b5ba2d0980f76b935523ad073a9  VALIDACION_0.8.0.md
+c6b2901a178903915063b539ca4fccb763f604d021f821b74b379db3e4b082f7  Validacion-modelo-publico-0.8.0.zip
+1b78049e582af36f24d557c634493b2db46317710696b553ddcc6bdbd58daaa6  paquete.json
+b84d2bf2bea70be60e41feca8431e4c566be0880fdbc0f5ef9b36465b1dbb929  programa.zip
